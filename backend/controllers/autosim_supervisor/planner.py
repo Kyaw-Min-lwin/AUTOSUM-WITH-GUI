@@ -12,7 +12,7 @@ AVAILABLE_SKILLS = {
     },
     "GoToTargetSkill": {
         "description": "Navigate toward a known target object.",
-        "params": ["target_id"],  # Be specific: target_id is better than just target
+        "params": ["target_id"],
     },
     "PatrolSkill": {
         "description": "Continuously patrol through waypoints.",

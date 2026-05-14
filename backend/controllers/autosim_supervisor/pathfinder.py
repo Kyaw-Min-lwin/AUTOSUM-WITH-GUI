@@ -2,7 +2,8 @@ import math
 import heapq
 
 class AStarPathfinder:
-    def __init__(self, cell_size=0.1, obstacle_padding=0.2, max_iterations=3000):
+
+    def __init__(self, cell_size=0.1, obstacle_padding=0.04, max_iterations=5000):
         # cell_size: The size of each grid square in meters
         # obstacle_padding: How wide to treat walls (Wall width + Robot radius)
         self.cell_size = cell_size
@@ -28,8 +29,8 @@ class AStarPathfinder:
         # Convert continuous obstacle positions into a set of grid coordinates
         # We also add padding around them so the robot doesn't clip corners!
         blocked_nodes = set()
-        pad_cells = int(math.ceil(self.padding / self.cell_size))
-        
+        pad_cells = int(round(self.padding / self.cell_size))
+
         for obs in obstacle_positions:
             obs_grid = self.to_grid(obs)
             for dx in range(-pad_cells, pad_cells + 1):

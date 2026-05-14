@@ -6,100 +6,58 @@ from llm_client import GroqClient
 from planner import PlannerAgent
 from executor import PlanExecutor
 from skills import AvoidObstacleSkill
+from blackboard import Blackboard  # <--- NEW IMPORT
 
 supervisor = Supervisor()
 TIME_STEP = int(supervisor.getBasicTimeStep())
-
 sio = socketio.Client()
 
 try:
     print("[E-PUCK] Attempting to connect to Flask Command Center...")
     sio.connect("http://localhost:5000")
 except Exception as e:
-    print(f"[E-PUCK] CRITICAL ERROR: Could not connect to Flask: {e}")
     sys.exit(1)
 
 
 @sio.event
 def connect():
-    sio.emit(
-        "agent_log",
-        {"agent": "E-Puck", "message": "Hardware online. Telemetry link established."},
-    )
+    sio.emit("agent_log", {"agent": "E-Puck", "message": "Hardware online."})
 
 
-@sio.event
-def disconnect():
-    print("[E-PUCK] Disconnected from Command Center.")
-
-
-# 1. Initialize motors once before the loop
+# 1. Initialize hardware
 left_motor = supervisor.getDevice("left wheel motor")
 right_motor = supervisor.getDevice("right wheel motor")
 proximity_sensors = []
-
-print("[System] Booting LLM Engine...")
-try:
-    my_llm = GroqClient(model="openai/gpt-oss-120b")
-    print("[System] LLM Engine Online!")
-
-except Exception as e:
-    print(f"[System] CRITICAL ERROR loading LLM: {e}")
-    sys.exit(1)
 
 for i in range(8):
     sensor = supervisor.getDevice(f"ps{i}")
     sensor.enable(TIME_STEP)
     proximity_sensors.append(sensor)
 
-print(proximity_sensors)
-
-target_node = supervisor.getFromDef("TARGET_0")
-print(target_node)
 if left_motor and right_motor:
     left_motor.setPosition(float("inf"))
     right_motor.setPosition(float("inf"))
     left_motor.setVelocity(0.0)
     right_motor.setVelocity(0.0)
 
-
-waypoint_nodes = []
-for i in range(3):
-    node = supervisor.getFromDef(f"TARGET_{i}")
-    if node:
-        waypoint_nodes.append(node)
-
 hardware_map = {
     "left_motor": left_motor,
     "right_motor": right_motor,
     "proximity_sensors": proximity_sensors,
 }
+
+print("[System] Booting LLM Engine...")
+try:
+    my_llm = GroqClient(model="openai/gpt-oss-120b")
+except Exception as e:
+    sys.exit(1)
+
+
+blackboard = Blackboard(supervisor)
+
 world_tracker = WorldState(supervisor, proximity_sensors)
-planner = PlannerAgent(llm_client=my_llm)  # Pass your actual LLM client here
+planner = PlannerAgent(llm_client=my_llm)
 executor = PlanExecutor(supervisor, sio, hardware_map)
-
-
-# 2. Initialize the active skill
-# current_skill = WanderSkill(supervisor, sio, left_motor, right_motor, proximity_sensors)
-# current_skill = SpinScanSkill(
-#     supervisor=supervisor,
-#     sio=sio,
-#     left_motor=left_motor,
-#     right_motor=right_motor,
-#     duration_ticks=150,
-#     rotation_speed=1.5,
-# )
-
-# current_skill = AvoidObstacleSkill(
-#     supervisor=supervisor,
-#     sio=sio,
-#     left_motor=left_motor,
-#     right_motor=right_motor,
-#     proximity_sensors=proximity_sensors,
-# )
-
-# current_skill = GoToTargetSkill(supervisor, sio, left_motor, right_motor, target_node)
-
 avoid_skill = AvoidObstacleSkill(
     supervisor, sio, left_motor, right_motor, proximity_sensors
 )
@@ -112,46 +70,75 @@ def is_path_blocked(sensors):
         return False
 
 
-user_goal = "Scan the area, then move to TARGET_0."
-needs_replanning = True
+# Initialize Mission on the Blackboard
+blackboard.set_user_goal("Scan the area, then move to TARGET_0.")
+blackboard.set_mission_status("needs_planning")
+
 tick = 0
 
+# ==========================================
+# THE AGENTIC LOOP (BLACKBOARD DRIVEN)
+# ==========================================
 while supervisor.step(TIME_STEP) != -1:
     tick += 1
+    blackboard.increment_tick()
 
-    # 1. UPDATE WORLD STATE
+    # 1. WORLD STATE -> BLACKBOARD
     world_tracker.update(active_skill=executor.current_skill)
-    current_state = world_tracker.get_state()
+    raw_state = world_tracker.get_state()
 
-    # 2. THE REPLANNING TRIGGER
-    if needs_replanning:
-        # Pause motors while thinking
+    # Update Blackboard with live physical data
+    blackboard.update_robot_state(
+        position=raw_state["robot"]["position"],
+        heading=raw_state["robot"]["heading"],
+        status=executor.status,
+    )
+
+    # Temporarily bypass the "Perception Agent" and load objects directly
+    blackboard.state["semantic_state"]["identified_objects"] = raw_state["objects"]
+
+    # 2. THE REPLANNING TRIGGER (Reading from Blackboard)
+    if blackboard.state["mission"]["status"] == "needs_planning":
+
+        # Pause motors while "thinking"
         left_motor.setVelocity(0)
         right_motor.setVelocity(0)
 
         print("\n[Brain] Triggering Planner...")
-        new_plan = planner.generate_plan(user_goal, current_state)
+        new_plan = planner.generate_plan(
+            blackboard.state["mission"]["user_goal"], blackboard.snapshot()
+        )
+
+        # Write the new plan to the Blackboard and Executor
+        blackboard.set_active_plan(new_plan.get("plan", []))
         executor.load_plan(new_plan)
-        needs_replanning = False
+
+        # Update status
+        blackboard.set_mission_status("executing")
 
     # 3. THE ARBITER (Safety Override)
     if is_path_blocked(proximity_sensors):
-        # Subsumption: take over, but DON'T clear the plan yet
         avoid_skill.update()
-
-        # Optional: If stuck for too long, set needs_replanning = True
+        blackboard.update_robot_state(status="evading")
     else:
         # 4. EXECUTE PLAN
         status = executor.update()
 
         if status == "DONE":
+            blackboard.set_mission_status("idle")
             print("[Brain] Mission Accomplished. Awaiting new orders.")
-            break  # Or ask user for new goal
+            break
 
         elif status == "FAILED":
-            print("[Brain] Plan failed! Initiating Replan...")
-            needs_replanning = True
+            # WRITE TO MEMORY: We failed!
+            blackboard.remember_event(
+                f"Plan failed during skill: {executor.current_skill.__class__.__name__}"
+            )
+            print("[Brain] Plan failed! Logging to memory and initiating Replan...")
+            # Change blackboard state to trigger LLM next tick
+            blackboard.set_mission_status("needs_planning")
 
-    # 5. TELEMETRY
+    # 5. TELEMETRY STREAMING
     if tick % 15 == 0:
-        sio.emit("world_state_stream", world_tracker.to_json())
+        # Stream the full Blackboard to the UI!
+        sio.emit("world_state_stream", blackboard.to_json())

@@ -218,6 +218,7 @@ class AvoidObstacleSkill(BaseSkill):
 
 
 class GoToTargetSkill(BaseSkill):
+
     def __init__(
         self,
         supervisor,
@@ -226,8 +227,8 @@ class GoToTargetSkill(BaseSkill):
         right_motor,
         target_node,
         forward_speed=3.0,
-        turn_speed=1.8,
-        angle_tolerance=0.15,
+        turn_speed=1.5,
+        angle_tolerance=0.2,
         distance_tolerance=0.1,  # Tolerance for the final target
     ):
         super().__init__(supervisor, sio, left_motor, right_motor)
@@ -237,7 +238,7 @@ class GoToTargetSkill(BaseSkill):
         self.angle_tolerance = angle_tolerance
         self.distance_tolerance = distance_tolerance
 
-        self.waypoint_tolerance = 0.15  # looser tolerance for intermediate grid points
+        self.waypoint_tolerance = 0.1  # looser tolerance for intermediate grid points
         self.path = []  # This will hold our A* waypoints
 
         self.arrived = False
@@ -273,7 +274,7 @@ class GoToTargetSkill(BaseSkill):
             )
 
         # 2. Run the A* algorithm
-        pathfinder = AStarPathfinder(cell_size=0.1, obstacle_padding=0.25)
+        pathfinder = AStarPathfinder(cell_size=0.1, obstacle_padding=0.04)
         self.path = pathfinder.find_path(robot_pos, target_pos, obstacle_positions)
 
         if not self.path:
@@ -336,6 +337,7 @@ class GoToTargetSkill(BaseSkill):
             if len(self.path) > 0:
                 # We hit a waypoint! Pop it from the list and continue.
                 self.path.pop(0)
+                self.set_wheel_speeds(0.0, 0.0)
                 return
             else:
                 # We hit the final target!
