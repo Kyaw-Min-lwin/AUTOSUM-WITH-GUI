@@ -6,7 +6,8 @@ from llm_client import GroqClient
 from planner import PlannerAgent
 from executor import PlanExecutor
 from skills import AvoidObstacleSkill
-from blackboard import Blackboard  # <--- NEW IMPORT
+from blackboard import Blackboard
+from perception_agent import PerceptionAgent
 
 supervisor = Supervisor()
 TIME_STEP = int(supervisor.getBasicTimeStep())
@@ -54,8 +55,8 @@ except Exception as e:
 
 
 blackboard = Blackboard(supervisor)
-
 world_tracker = WorldState(supervisor, proximity_sensors)
+perception = PerceptionAgent(blackboard, sio)
 planner = PlannerAgent(llm_client=my_llm)
 executor = PlanExecutor(supervisor, sio, hardware_map)
 avoid_skill = AvoidObstacleSkill(
@@ -76,26 +77,26 @@ blackboard.set_mission_status("needs_planning")
 
 tick = 0
 
+
 # ==========================================
-# THE AGENTIC LOOP (BLACKBOARD DRIVEN)
-# ==========================================
+# THE AGENTIC LOOP
 while supervisor.step(TIME_STEP) != -1:
     tick += 1
     blackboard.increment_tick()
 
-    # 1. WORLD STATE -> BLACKBOARD
+    # 1. RAW PHYSICS -> BLACKBOARD
     world_tracker.update(active_skill=executor.current_skill)
     raw_state = world_tracker.get_state()
 
     # Update Blackboard with live physical data
+    blackboard.set_world_state(raw_state)
     blackboard.update_robot_state(
         position=raw_state["robot"]["position"],
         heading=raw_state["robot"]["heading"],
         status=executor.status,
     )
 
-    # Temporarily bypass the "Perception Agent" and load objects directly
-    blackboard.state["semantic_state"]["identified_objects"] = raw_state["objects"]
+    perception.update()
 
     # 2. THE REPLANNING TRIGGER (Reading from Blackboard)
     if blackboard.state["mission"]["status"] == "needs_planning":
@@ -112,8 +113,6 @@ while supervisor.step(TIME_STEP) != -1:
         # Write the new plan to the Blackboard and Executor
         blackboard.set_active_plan(new_plan.get("plan", []))
         executor.load_plan(new_plan)
-
-        # Update status
         blackboard.set_mission_status("executing")
 
     # 3. THE ARBITER (Safety Override)
@@ -130,15 +129,12 @@ while supervisor.step(TIME_STEP) != -1:
             break
 
         elif status == "FAILED":
-            # WRITE TO MEMORY: We failed!
             blackboard.remember_event(
                 f"Plan failed during skill: {executor.current_skill.__class__.__name__}"
             )
             print("[Brain] Plan failed! Logging to memory and initiating Replan...")
-            # Change blackboard state to trigger LLM next tick
             blackboard.set_mission_status("needs_planning")
 
     # 5. TELEMETRY STREAMING
     if tick % 15 == 0:
-        # Stream the full Blackboard to the UI!
         sio.emit("world_state_stream", blackboard.to_json())
