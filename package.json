@@ -1,0 +1,17 @@
+{
+  "name": "autosim_desktop-gui",
+  "version": "1.0.0",
+  "description": "AutoSim Sovereign Robotics Framework",
+  "main": "main.js",
+  "scripts": {
+    "start": "concurrently \"python backend/app.py\" \"electron frontend/main.js\""
+  },
+  "keywords": [],
+  "author": "The Architect",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "electron": "^41.3.0"
+  }
+}

@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AutoSim Command Center</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
+
+    <style>
+        body {
+            background: #0e0e0f;
+            color: #e4e4e7;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
+        .panel {
+            background: #18181b;
+            border: 1px solid #27272a;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+        }
+
+        .panel-soft {
+            background: #141417;
+            border: 1px solid #232326;
+        }
+
+        .section-label {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: #71717a;
+        }
+
+        .input-box {
+            width: 100%;
+            height: 90px;
+            background: #0f0f12;
+            border: 1px solid #2a2a2e;
+            border-radius: 8px;
+            padding: 10px;
+            font-size: 13px;
+            color: #d4d4d8;
+        }
+
+        .input-box:focus {
+            border-color: #a1a1aa;
+        }
+
+        .tool-btn {
+            background: #18181b;
+            border: 1px solid #2f2f35;
+            border-radius: 8px;
+            padding: 8px;
+            font-size: 13px;
+            color: #d4d4d8;
+            transition: all 0.15s ease;
+        }
+
+        .tool-btn:hover {
+            background: #222226;
+        }
+
+        .tool-btn.active {
+            background: #e4e4e7;
+            color: #09090b;
+        }
+
+        .danger-btn {
+            background: transparent;
+            border: 1px solid #7f1d1d;
+            color: #f87171;
+            border-radius: 8px;
+            padding: 8px;
+        }
+
+        .danger-btn:hover {
+            background: rgba(127, 29, 29, 0.2);
+        }
+
+        .info-box {
+            background: #111114;
+            border: 1px solid #232326;
+            border-radius: 8px;
+            padding: 10px;
+            font-size: 12px;
+            color: #71717a;
+            line-height: 1.5;
+        }
+
+        .run-btn {
+            width: 100%;
+            background: linear-gradient(145deg, #e4e4e7, #d4d4d8);
+            color: #09090b;
+            font-weight: 600;
+            padding: 12px;
+            border-radius: 10px;
+            transition: all 0.2s ease;
+        }
+
+        .run-btn:hover {
+            transform: translateY(-1px);
+            background: #d4d4d8;
+        }
+
+        .btn-primary {
+            background: #e4e4e7;
+            color: #09090b;
+        }
+
+        .btn-primary:hover {
+            background: #d4d4d8;
+        }
+
+        textarea:focus {
+            outline: none;
+            border-color: #a1a1aa;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #2a2a2e;
+        }
+
+        .tool-btn {
+            transition: all 0.15s ease;
+        }
+
+        .tool-btn:hover {
+            transform: translateY(-1px);
+        }
+    </style>
+</head>
+
+<body class="h-screen w-screen flex flex-col overflow-hidden">
+
+    <!-- Header -->
+    <header class="panel h-14 flex items-center justify-between px-6 border-b shadow-sm">
+        <div class="flex items-center space-x-3">
+            <div class="w-2 h-2 rounded-full bg-gray-400"></div>
+            <h1 class="text-sm font-semibold tracking-wide text-white">
+                AutoSim
+                <span class="text-gray-500 font-normal ml-2">Command Center</span>
+            </h1>
+        </div>
+        <div class="flex items-center space-x-2 text-xs font-mono text-gray-400">
+            <div id="status-dot" class="status-dot bg-gray-500"></div>
+            <span id="connection-status">OFFLINE</span>
+        </div>
+    </header>
+
+    <!-- Main -->
+    <main class="flex-1 flex overflow-hidden">
+
+        <!-- Sidebar -->
+        <aside class="w-80 panel border-r flex flex-col p-6 gap-8">
+
+            <!-- Section: Mission -->
+            <div class="space-y-2">
+                <label class="section-label">Mission Directive</label>
+                <textarea id="goal-input" class="input-box" placeholder="Define objective..."></textarea>
+            </div>
+
+            <!-- Section: Tools -->
+            <div class="space-y-3">
+                <label class="section-label">Map Tools</label>
+
+                <div class="grid grid-cols-2 gap-2">
+                    <button class="tool-btn border border-[#333] rounded py-2 text-sm font-medium transition-colors hover:bg-[#2a2a2a]"
+                        data-tool="epuck">🤖 E-Puck</button>
+                    <button class="tool-btn active" data-tool="wall">Wall</button>
+                    <button class="tool-btn" data-tool="target">Target</button>
+                    <button class="tool-btn" data-tool="erase">Erase</button>
+                    <button id="clear-map-btn" class="danger-btn">Clear</button>
+                </div>
+            </div>
+
+            <!-- Section: Info -->
+            <div class="info-box">
+                Use left click to place objects.<br />
+                Drag to paint continuously.<br />
+                Hold left click and move to rotate camera.
+            </div>
+
+            <!-- Run -->
+            <div class="mt-auto">
+                <button id="start-btn" class="run-btn">
+                    Execute Run
+                </button>
+            </div>
+        </aside>
+
+        <!-- Right Side: Vertical Flex for Canvas and Console -->
+        <div class="flex-1 flex flex-col min-w-0 bg-[#0a0a0a]">
+
+            <!-- Dual-Canvas Viewport -->
+            <section class="flex-1 relative" id="viewport-container">
+                <!-- Three.js Map Builder -->
+                <div id="canvas-container" class="absolute inset-0 z-10"></div>
+
+                <!-- Webots TCP Stream (Hidden initially) -->
+                <iframe id="webots-stream" class="absolute inset-0 w-full h-full border-none z-0 hidden" src="" allowfullscreen
+                    allow="fullscreen"></iframe>
+            </section>
+
+            <!-- Live Streaming Console -->
+            <section id="console-panel"
+                class="h-56 bg-[#09090b] border-t border-[#232326] p-4 overflow-y-auto font-mono text-[13px] flex flex-col space-y-2 shadow-inner">
+                <div class="text-gray-500">Initialize sequence to view agent telemetry...</div>
+            </section>
+
+        </div>
+
+    </main>
+
+
+
+    <!-- Socket & UI Coordination -->
+    <script>
+        const socket = io('http://localhost:5000');
+        const statusEl = document.getElementById('connection-status');
+            const statusDot = document.getElementById('status-dot');
+            const consolePanel = document.getElementById('console-panel');
+
+            // Connection Status Aesthetics
+        socket.on('connect', () => {
+            statusEl.textContent = 'LINK ACTIVE';
+            statusEl.classList.replace('text-gray-400', 'text-emerald-400');
+            statusDot.classList.replace('bg-gray-500', 'bg-emerald-500');
+            statusDot.classList.add('shadow-[0_0_8px_rgba(16,185,129,0.8)]');
+        });
+
+        socket.on('disconnect', () => {
+            statusEl.textContent = 'OFFLINE';
+            statusEl.classList.replace('text-emerald-400', 'text-gray-400');
+            statusDot.classList.replace('bg-emerald-500', 'bg-gray-500');
+            statusDot.classList.remove('shadow-[0_0_8px_rgba(16,185,129,0.8)]');
+        });
+
+            // Intercept Agent chatter and inject it into the terminal
+            socket.on('agent_log', (data) => {
+                const entry = document.createElement('div');
+
+            // Assign specific colors to specific agents
+            let color = 'text-gray-300';
+            if (data.agent === 'Director') color = 'text-blue-400';
+            else if (data.agent === 'Oracle') color = 'text-purple-400';
+            else if (data.agent === 'Forge') color = 'text-amber-400';
+            else if (data.agent === 'Inspector') color = 'text-emerald-400';
+            else if (data.agent === 'SkillSystem') color = 'text-cyan-400';
+            else if (data.agent === 'WanderSkill') color = 'text-orange-400';
+            else if (data.agent === 'AvoidObstacleSkill') color = 'text-red-400';
+            else if (data.agent === 'E-Puck') color = 'text-lime-400';
+
+            const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+            entry.innerHTML = `<span class="text-gray-600">[${time}]</span> <span class="font-bold ${color}">[${data.agent}]</span> <span class="text-gray-300">${data.message}</span>`;
+
+            consolePanel.appendChild(entry);
+            consolePanel.scrollTop = consolePanel.scrollHeight; // Auto-scroll to bottom
+        });
+
+            // Trigger the sequence
+            document.getElementById('start-btn').addEventListener('click', () => {
+                const goal = document.getElementById('goal-input').value.trim();
+                if (!goal) return;
+
+            // Safely grab the map data from the 3D canvas
+            const mapData = window.exportMapData ? window.exportMapData() : { walls: [], targets: [] };
+
+            // UI visual feedback
+            consolePanel.innerHTML = '<div class="text-sky-400 mb-2 mt-4 font-bold">--- NEW SIMULATION RUN INITIATED ---</div>';
+
+            socket.emit('submit_goal', { goal: goal, map: mapData });
+        });
+    </script>
+    <script src="map_builder.js"></script>
+</body>
+
+</html>
