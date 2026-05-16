@@ -5,7 +5,7 @@ class PlanExecutor:
         self.supervisor = supervisor
         self.sio = sio
         self.hardware_map = hardware_map
-        
+
         self.plan_queue = []
         self.current_skill = None
         self.status = "IDLE" # IDLE, RUNNING, DONE, FAILED
@@ -15,7 +15,7 @@ class PlanExecutor:
         self.plan_queue = plan_dict.get("plan", [])
         self.current_skill = None
         self.status = "RUNNING" if self.plan_queue else "IDLE"
-        
+
         if self.sio:
             self.sio.emit("agent_log", {"agent": "Executor", "message": f"Loaded new plan with {len(self.plan_queue)} steps."})
 
@@ -38,7 +38,7 @@ class PlanExecutor:
                 self.abort() # Clear the rest of the plan
                 self.status = "FAILED"
                 return self.status
-            
+
             self.current_skill.stop()
             self.current_skill = None
             return "RUNNING" # Still running the overall plan
@@ -65,26 +65,38 @@ class PlanExecutor:
         if self.sio:
             self.sio.emit("agent_log", {"agent": "Executor", "message": f"Executing: {skill_name} | Reason: {reason}"})
 
+        TIME_STEP = int(self.supervisor.getBasicTimeStep())
         # --- THE SKILL FACTORY ---
         if skill_name == "SpinScanSkill":
+            seconds = params.get("duration_seconds", 3.0)
+            ticks = int(seconds * (1000.0 / TIME_STEP))
+
             self.current_skill = SpinScanSkill(
-                self.supervisor, self.sio, 
-                self.hardware_map["left_motor"], self.hardware_map["right_motor"],
-                duration_ticks=params.get("duration", 100)
+                self.supervisor,
+                self.sio,
+                self.hardware_map["left_motor"],
+                self.hardware_map["right_motor"],
+                duration_ticks=ticks,
             )
 
         elif skill_name == "WanderSkill":
+            seconds = params.get("duration_seconds", 10.0)
+            ticks = int(seconds * (1000.0 / TIME_STEP))
+
             self.current_skill = WanderSkill(
-                self.supervisor, self.sio, 
-                self.hardware_map["left_motor"], self.hardware_map["right_motor"],
-                self.hardware_map["proximity_sensors"]
+                self.supervisor,
+                self.sio,
+                self.hardware_map["left_motor"],
+                self.hardware_map["right_motor"],
+                self.hardware_map["proximity_sensors"],
+                duration_ticks=ticks,  # Pass ticks to the skill
             )
 
         elif skill_name == "GoToTargetSkill":
             # We must find the specific target node the LLM asked for
             target_id = params.get("target_id")
             target_node = self.supervisor.getFromDef(target_id)
-            
+
             if not target_node:
                 print(f"[Executor] ERROR: Target {target_id} not found in world!")
                 self.abort()
@@ -96,15 +108,10 @@ class PlanExecutor:
                 self.hardware_map["left_motor"], self.hardware_map["right_motor"],
                 target_node=target_node
             )
-        
+
         elif skill_name == "PatrolSkill":
-            # Assuming the LLM JSON passes: "parameters": {"waypoints": ["TARGET_0", "TARGET_1"]}
             waypoint_ids = params.get("waypoints", [])
-            
-            # Fetch the actual Webots nodes from the strings
             waypoint_nodes = [self.supervisor.getFromDef(wid) for wid in waypoint_ids]
-            
-            # Filter out any None values in case the LLM hallucinated a bad target ID
             waypoint_nodes = [n for n in waypoint_nodes if n is not None]
 
             if not waypoint_nodes:
@@ -119,5 +126,5 @@ class PlanExecutor:
                 waypoint_nodes=waypoint_nodes,
                 goto_skill_class=GoToTargetSkill # Notice we pass the Class, not an instance!
             )
-            
+
         self.current_skill.start()

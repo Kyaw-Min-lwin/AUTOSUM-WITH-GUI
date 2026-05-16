@@ -3,11 +3,13 @@ import socketio
 from controller import Supervisor
 from world_state import WorldState
 from llm_client import GroqClient
-from planner import PlannerAgent
+from navigator_agent import NavigatorAgent
+from mission_director import MissionDirector
 from executor import PlanExecutor
 from skills import AvoidObstacleSkill
 from blackboard import Blackboard
 from perception_agent import PerceptionAgent
+from pathfinder import AStarPathfinder
 
 supervisor = Supervisor()
 TIME_STEP = int(supervisor.getBasicTimeStep())
@@ -56,12 +58,16 @@ except Exception as e:
 
 blackboard = Blackboard(supervisor)
 world_tracker = WorldState(supervisor, proximity_sensors)
-perception = PerceptionAgent(blackboard, sio)
-planner = PlannerAgent(llm_client=my_llm)
 executor = PlanExecutor(supervisor, sio, hardware_map)
 avoid_skill = AvoidObstacleSkill(
     supervisor, sio, left_motor, right_motor, proximity_sensors
 )
+global_pathfinder = AStarPathfinder(cell_size=0.1, obstacle_padding=0.25)
+perception = PerceptionAgent(blackboard, sio)
+director = MissionDirector(blackboard, my_llm, sio)
+
+# Inject the Tool into the Navigator!
+navigator = NavigatorAgent(llm_client=my_llm, pathfinder=global_pathfinder, sio=sio)
 
 
 def is_path_blocked(sensors):
@@ -72,8 +78,8 @@ def is_path_blocked(sensors):
 
 
 # Initialize Mission on the Blackboard
-blackboard.set_user_goal("Scan the area, then move to TARGET_0.")
-blackboard.set_mission_status("needs_planning")
+blackboard.set_user_goal("Scan the area, then find and move to TARGET_0.")
+blackboard.set_mission_status("needs_objectives")
 
 tick = 0
 
@@ -98,43 +104,61 @@ while supervisor.step(TIME_STEP) != -1:
 
     perception.update()
 
-    # 2. THE REPLANNING TRIGGER (Reading from Blackboard)
-    if blackboard.state["mission"]["status"] == "needs_planning":
-
-        # Pause motors while "thinking"
+    if blackboard.state["mission"]["status"] == "needs_objectives":
         left_motor.setVelocity(0)
         right_motor.setVelocity(0)
 
-        print("\n[Brain] Triggering Planner...")
-        new_plan = planner.generate_plan(
-            blackboard.state["mission"]["user_goal"], blackboard.snapshot()
-        )
+        print("\n[Brain] Waking Mission Director...")
+        director.generate_objectives()
+        blackboard.set_mission_status("needs_planning")
 
-        # Write the new plan to the Blackboard and Executor
-        blackboard.set_active_plan(new_plan.get("plan", []))
-        executor.load_plan(new_plan)
-        blackboard.set_mission_status("executing")
+    elif blackboard.state["mission"]["status"] == "needs_planning":
+        left_motor.setVelocity(0)
+        right_motor.setVelocity(0)
 
-    # 3. THE ARBITER (Safety Override)
+        current_obj = blackboard.state["mission"]["current_objective"]
+        if current_obj:
+            # We now pass the ENTIRE snapshot! The Navigator handles its own extraction.
+            new_plan = navigator.generate_plan(blackboard.snapshot())
+
+            blackboard.set_active_plan(new_plan.get("plan", []))
+            executor.load_plan(new_plan)
+            blackboard.set_mission_status("executing")
+        else:
+            blackboard.set_mission_status("idle")
+
+    # THE ARBITER
     if is_path_blocked(proximity_sensors):
         avoid_skill.update()
         blackboard.update_robot_state(status="evading")
-    else:
-        # 4. EXECUTE PLAN
+    elif blackboard.state["mission"]["status"] == "executing":
         status = executor.update()
 
         if status == "DONE":
-            blackboard.set_mission_status("idle")
-            print("[Brain] Mission Accomplished. Awaiting new orders.")
-            break
+            print("[Executor] Objective complete.")
+
+            objectives = blackboard.state["mission"]["objectives"]
+            if objectives:
+                objectives.pop(0)
+
+            if objectives:
+                blackboard.set_current_objective(objectives[0])
+                blackboard.set_mission_status("needs_planning")
+            else:
+                blackboard.set_mission_status("idle")
+                blackboard.set_current_objective(None)
+                print(
+                    "[Brain] All Mission Objectives Accomplished. Awaiting new orders."
+                )
 
         elif status == "FAILED":
+            # Total failure. Log it and ask the Director to rethink the whole strategy.
             blackboard.remember_event(
-                f"Plan failed during skill: {executor.current_skill.__class__.__name__}"
+                f"Objective '{blackboard.state['mission']['current_objective']}' failed."
             )
-            print("[Brain] Plan failed! Logging to memory and initiating Replan...")
-            blackboard.set_mission_status("needs_planning")
+            print("[Executor] Plan failed! Triggering Strategic Replan...")
+            blackboard.set_mission_status("needs_objectives")
 
-    # 5. TELEMETRY STREAMING
+    # 7. TELEMETRY
     if tick % 15 == 0:
         sio.emit("world_state_stream", blackboard.to_json())

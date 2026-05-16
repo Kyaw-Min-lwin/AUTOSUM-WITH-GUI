@@ -79,6 +79,7 @@ class SpinScanSkill(BaseSkill):
 
 
 class WanderSkill(BaseSkill):
+
     def __init__(
         self,
         supervisor,
@@ -88,7 +89,8 @@ class WanderSkill(BaseSkill):
         proximity_sensors=None,
         forward_speed=2.5,
         turn_speed=2.0,
-        obstacle_threshold=150.0,  # Increased threshold
+        obstacle_threshold=150.0,
+        duration_ticks=300,
     ):
         super().__init__(supervisor, sio, left_motor, right_motor)
         self.proximity_sensors = proximity_sensors or []
@@ -97,9 +99,12 @@ class WanderSkill(BaseSkill):
         self.obstacle_threshold = obstacle_threshold
         self.state = "forward"
         self.turn_ticks_remaining = 0
+        self.duration_ticks = duration_ticks
+        self.current_tick = 0
 
     def start(self):
         super().start()
+        self.current_tick = 0
         if self.sio:
             self.sio.emit(
                 "agent_log",
@@ -107,6 +112,10 @@ class WanderSkill(BaseSkill):
             )
 
     def update(self):
+        self.current_tick += 1
+        if self.current_tick > self.duration_ticks:
+            self.set_wheel_speeds(0.0, 0.0)
+            return
         if self.state == "turning":
             self.set_wheel_speeds(self.turn_speed, -self.turn_speed)
             self.turn_ticks_remaining -= 1
@@ -136,6 +145,9 @@ class WanderSkill(BaseSkill):
             return
 
         self.set_wheel_speeds(self.forward_speed, self.forward_speed)
+
+    def is_complete(self):
+        return self.current_tick >= self.duration_ticks
 
     def detect_obstacle(self):
         if not self.proximity_sensors:
