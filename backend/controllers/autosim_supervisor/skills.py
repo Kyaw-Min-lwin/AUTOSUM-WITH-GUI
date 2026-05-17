@@ -585,3 +585,101 @@ class AerialScanSkill(BaseSkill):
 
     def is_complete(self):
         return False
+
+
+class FollowLeaderSkill(BaseSkill):
+    def __init__(
+        self,
+        agent_id,
+        supervisor,
+        sio,
+        left_motor,
+        right_motor,
+        leader_id,
+        follow_distance=0.4,  # Stop 40cm behind the leader
+        forward_speed=3.0,
+        turn_speed=1.8,
+        angle_tolerance=0.15,
+    ):
+        super().__init__(agent_id, supervisor, sio, left_motor, right_motor)
+        self.leader_id = leader_id
+        self.leader_node = self.supervisor.getFromDef(leader_id.upper())
+
+        self.follow_distance = follow_distance
+        self.forward_speed = forward_speed
+        self.turn_speed = turn_speed
+        self.angle_tolerance = angle_tolerance
+
+    def start(self):
+        super().start()
+        if not self.leader_node:
+            if self.sio:
+                self.sio.emit(
+                    "agent_log",
+                    {
+                        "agent": self.agent_id,
+                        "message": f"CRITICAL ERROR: Leader '{self.leader_id}' not found. Cannot follow.",
+                    },
+                )
+        else:
+            if self.sio:
+                self.sio.emit(
+                    "agent_log",
+                    {
+                        "agent": self.agent_id,
+                        "message": f"Locking tracking sensors onto {self.leader_id.upper()}.",
+                    },
+                )
+
+    def update(self):
+        if not self.leader_node:
+            self.set_wheel_speeds(0.0, 0.0)
+            return
+
+        # 1. Get my position and heading
+        my_pos = self.supervisor.getSelf().getPosition()
+        my_x, my_y = my_pos[0], my_pos[1]
+
+        orientation = self.supervisor.getSelf().getOrientation()
+        my_heading = math.atan2(orientation[3], orientation[0])
+
+        # 2. Get leader position
+        leader_pos = self.leader_node.getPosition()
+        lx, ly = leader_pos[0], leader_pos[1]
+
+        # 3. Calculate distance and angle
+        dx = lx - my_x
+        dy = ly - my_y
+        distance = math.sqrt(dx**2 + dy**2)
+
+        # 4. Escort Logic (Maintain safe distance)
+        if distance < self.follow_distance:
+            # We are close enough, hit the brakes!
+            self.set_wheel_speeds(0.0, 0.0)
+            return
+
+        # 5. Steering Logic
+        target_angle = math.atan2(dy, dx)
+        angle_error = self.normalize_angle(target_angle - my_heading)
+
+        if abs(angle_error) > self.angle_tolerance:
+            # Turn towards the leader
+            if angle_error > 0:
+                self.set_wheel_speeds(-self.turn_speed, self.turn_speed)
+            else:
+                self.set_wheel_speeds(self.turn_speed, -self.turn_speed)
+            return
+
+        # Drive straight towards leader
+        self.set_wheel_speeds(self.forward_speed, self.forward_speed)
+
+    def normalize_angle(self, angle):
+        while angle > math.pi:
+            angle -= 2 * math.pi
+        while angle < -math.pi:
+            angle += 2 * math.pi
+        return angle
+
+    def is_complete(self):
+        # Following is a continuous "Escort" state until the mission ends
+        return False

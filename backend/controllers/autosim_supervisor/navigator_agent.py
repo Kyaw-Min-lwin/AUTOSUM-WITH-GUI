@@ -18,6 +18,10 @@ AVAILABLE_SKILLS = {
         "description": "Continuously patrol through waypoints.",
         "params": [],
     },
+    "FollowLeaderSkill": {
+        "description": "Follow the target robot through a safe distance",
+        "params": ["leader_id"],
+    },
 }
 
 

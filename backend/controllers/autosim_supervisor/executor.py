@@ -4,6 +4,7 @@ from skills import (
     GoToTargetSkill,
     PatrolSkill,
     AerialScanSkill,
+    FollowLeaderSkill,
 )
 
 class PlanExecutor:
@@ -60,18 +61,6 @@ class PlanExecutor:
 
         # 1. If no skill is running, load the next one
         if self.current_skill is None:
-            # if "drone" in self.agent_id.lower():
-            #     skill = {
-            #         "confidence": 0.9,
-            #         "plan": [
-            #             {
-            #                 "skill": "AerialScanSkill",
-            #                 "parameters": {},
-            #                 "reason": "Aerial Drone Skill",
-            #             }
-            #         ],
-            #     }
-            #     self.plan_queue.append(skill)
             if not self.plan_queue:
                 self.status = "DONE"
                 return self.status
@@ -197,6 +186,25 @@ class PlanExecutor:
                 sio=self.sio,
                 left_motor=None,
                 right_motor=None,
+            )
+
+        elif skill_name == "FollowLeaderSkill":
+            leader_id = params.get("leader_id")
+            if not leader_id:
+                print(
+                    f"[{self.agent_id} Executor] ERROR: FollowLeaderSkill missing leader_id parameter."
+                )
+                self.abort()
+                self.status = "FAILED"
+                return
+
+            self.current_skill = FollowLeaderSkill(
+                agent_id=self.agent_id,
+                supervisor=self.supervisor,
+                sio=self.sio,
+                left_motor=self.hardware_map["left_motor"],
+                right_motor=self.hardware_map["right_motor"],
+                leader_id=leader_id,
             )
 
         self.current_skill.start()

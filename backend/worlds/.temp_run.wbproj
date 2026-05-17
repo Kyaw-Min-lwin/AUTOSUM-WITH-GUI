@@ -8,4 +8,7 @@ orthographicViewHeight: 1
 textFiles: -1
 renderingDevicePerspectives: drone_1:camera;1;1;0;0
 renderingDevicePerspectives: e-puck:camera;1;1;0;0
+renderingDevicePerspectives: epuck_10:camera;1;1;0;0
 renderingDevicePerspectives: epuck_1:camera;1;1;0;0
+renderingDevicePerspectives: epuck_2:camera;1;1;0;0
+renderingDevicePerspectives: epuck_6:camera;1;1;0;0
