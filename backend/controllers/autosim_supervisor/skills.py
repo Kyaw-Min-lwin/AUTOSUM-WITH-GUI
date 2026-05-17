@@ -503,6 +503,10 @@ class AerialScanSkill(BaseSkill):
     def __init__(self, agent_id, supervisor, sio, left_motor=None, right_motor=None):
         super().__init__(agent_id, supervisor, sio, left_motor, right_motor)
         self.drone_node = self.supervisor.getFromDef(agent_id.upper())
+        if self.drone_node is None:
+            raise Exception(
+                f"CRITICAL: Drone node '{agent_id.upper()}' not found in the Webots world!"
+            )
         self.translation_field = self.drone_node.getField("translation")
         self.target_altitude = 3.0
         self.ascent_speed = 0.015

@@ -1,14 +1,22 @@
-from skills import SpinScanSkill, WanderSkill, GoToTargetSkill, PatrolSkill
+from skills import (
+    SpinScanSkill,
+    WanderSkill,
+    GoToTargetSkill,
+    PatrolSkill,
+    AerialScanSkill,
+)
 
 class PlanExecutor:
-    def __init__(self, supervisor, sio, hardware_map):
+
+    def __init__(self, agent_id, supervisor, sio, hardware_map):
+        self.agent_id = agent_id
         self.supervisor = supervisor
         self.sio = sio
         self.hardware_map = hardware_map
 
         self.plan_queue = []
         self.current_skill = None
-        self.status = "IDLE" # IDLE, RUNNING, DONE, FAILED
+        self.status = "IDLE"
 
     def load_plan(self, plan_dict):
         """Loads a validated JSON plan from the Planner."""
@@ -17,7 +25,13 @@ class PlanExecutor:
         self.status = "RUNNING" if self.plan_queue else "IDLE"
 
         if self.sio:
-            self.sio.emit("agent_log", {"agent": "Executor", "message": f"Loaded new plan with {len(self.plan_queue)} steps."})
+            self.sio.emit(
+                "agent_log",
+                {
+                    "agent": self.agent_id,
+                    "message": f"Loaded new plan with {len(self.plan_queue)} steps.",
+                },
+            )
 
     def update(self):
         """Called every physics tick."""
@@ -63,7 +77,13 @@ class PlanExecutor:
         reason = step.get("reason", "No reason provided")
 
         if self.sio:
-            self.sio.emit("agent_log", {"agent": "Executor", "message": f"Executing: {skill_name} | Reason: {reason}"})
+            self.sio.emit(
+                "agent_log",
+                {
+                    "agent": self.agent_id,
+                    "message": f"Executing: {skill_name} | Reason: {reason}",
+                },
+            )
 
         TIME_STEP = int(self.supervisor.getBasicTimeStep())
         # --- THE SKILL FACTORY ---
@@ -72,10 +92,11 @@ class PlanExecutor:
             ticks = int(seconds * (1000.0 / TIME_STEP))
 
             self.current_skill = SpinScanSkill(
-                self.supervisor,
-                self.sio,
-                self.hardware_map["left_motor"],
-                self.hardware_map["right_motor"],
+                agent_id=self.agent_id,
+                supervisor=self.supervisor,
+                sio=self.sio,
+                left_motor=self.hardware_map["left_motor"],
+                right_motor=self.hardware_map["right_motor"],
                 duration_ticks=ticks,
             )
 
@@ -84,29 +105,34 @@ class PlanExecutor:
             ticks = int(seconds * (1000.0 / TIME_STEP))
 
             self.current_skill = WanderSkill(
-                self.supervisor,
-                self.sio,
-                self.hardware_map["left_motor"],
-                self.hardware_map["right_motor"],
-                self.hardware_map["proximity_sensors"],
-                duration_ticks=ticks,  # Pass ticks to the skill
+                agent_id=self.agent_id,  # <--- ADDED
+                supervisor=self.supervisor,
+                sio=self.sio,
+                left_motor=self.hardware_map["left_motor"],
+                right_motor=self.hardware_map["right_motor"],
+                proximity_sensors=self.hardware_map["proximity_sensors"],
+                duration_ticks=ticks,
             )
 
         elif skill_name == "GoToTargetSkill":
-            # We must find the specific target node the LLM asked for
             target_id = params.get("target_id")
             target_node = self.supervisor.getFromDef(target_id)
 
             if not target_node:
-                print(f"[Executor] ERROR: Target {target_id} not found in world!")
+                print(
+                    f"[{self.agent_id} Executor] ERROR: Target {target_id} not found in world!"
+                )
                 self.abort()
                 self.status = "FAILED"
                 return
 
             self.current_skill = GoToTargetSkill(
-                self.supervisor, self.sio, 
-                self.hardware_map["left_motor"], self.hardware_map["right_motor"],
-                target_node=target_node
+                agent_id=self.agent_id,
+                supervisor=self.supervisor,
+                sio=self.sio,
+                left_motor=self.hardware_map["left_motor"],
+                right_motor=self.hardware_map["right_motor"],
+                target_node=target_node,
             )
 
         elif skill_name == "PatrolSkill":
@@ -115,16 +141,30 @@ class PlanExecutor:
             waypoint_nodes = [n for n in waypoint_nodes if n is not None]
 
             if not waypoint_nodes:
-                print("[Executor] ERROR: PatrolSkill received no valid waypoints.")
+                print(
+                    f"[{self.agent_id} Executor] ERROR: PatrolSkill received no valid waypoints."
+                )
                 self.abort()
                 self.status = "FAILED"
                 return
 
             self.current_skill = PatrolSkill(
-                self.supervisor, self.sio, 
-                self.hardware_map["left_motor"], self.hardware_map["right_motor"],
+                agent_id=self.agent_id,  # <--- ADDED
+                supervisor=self.supervisor,
+                sio=self.sio,
+                left_motor=self.hardware_map["left_motor"],
+                right_motor=self.hardware_map["right_motor"],
                 waypoint_nodes=waypoint_nodes,
-                goto_skill_class=GoToTargetSkill # Notice we pass the Class, not an instance!
+                goto_skill_class=GoToTargetSkill,
+            )
+
+        elif skill_name == "AerialScanSkill":
+            self.current_skill = AerialScanSkill(
+                agent_id=self.agent_id,
+                supervisor=self.supervisor,
+                sio=self.sio,
+                left_motor=None,
+                right_motor=None,
             )
 
         self.current_skill.start()
