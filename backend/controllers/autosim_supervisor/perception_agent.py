@@ -10,16 +10,14 @@ class PerceptionAgent:
         self.last_summary = ""
 
     # MAIN UPDATE
-    def update(self):
+    def update(self, agent_id):
         snapshot = self.blackboard.snapshot()
-        robot = snapshot["robot"]
-        semantic_objects = []
-        blocked_zones = []
+        robot = snapshot.get("robots", {}).get(agent_id, {})
         robot_position = robot.get("position")
-
         if not robot_position:
             return
-    
+        semantic_objects = []
+        blocked_zones = []
         objects = snapshot.get("world_state", {}).get("objects", [])
 
         for obj in objects:

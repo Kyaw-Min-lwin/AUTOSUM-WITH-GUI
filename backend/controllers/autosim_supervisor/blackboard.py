@@ -11,48 +11,77 @@ class Blackboard:
             "mission": {
                 "user_goal": None,
                 "status": "idle",
-                "current_objective": None,
-                "objectives": [],
+                "objectives": {},
+                "current_objectives": {},
             },
+            # GLOBAL SEMANTIC STATE
             "semantic_state": {
                 "identified_objects": [],
                 "dynamic_obstacles": [],
                 "danger_zones": [],
                 "reachable_targets": [],
+                "discovered_targets": [],
             },
+            # PER-AGENT EXECUTION STATE
             "execution": {
-                "active_plan": [],
-                "active_skill": None,
-                "skill_queue": [],
-                "last_completed_skill": None,
+                "execution_states": {},
+                "active_plans": {},
+                "current_skills": {},
+                "skill_queues": {},
+                "last_completed_skills": {},
             },
+            # PER-AGENT MEMORY
             "memory": {
-                "visited_locations": [],
-                "failed_paths": [],
+                "visited_locations": {},
+                "failed_paths": {},
+                "event_logs": {},
                 "mission_history": [],
-                "event_log": [],
             },
-            "robot": {"position": None, "heading": None, "status": "idle"},
+            # PER-AGENT ROBOT STATE
+            "robots": {},
+            # GLOBAL RUNTIME
             "runtime": {"last_update": round(self.supervisor.getTime(), 2), "tick": 0},
+            # RAW WORLD STATE
             "world_state": {},
         }
 
+    # AGENT REGISTRATION
+    def register_agent(self, agent_id, agent_type="ground"):
+        # Mission state
+        self.state["mission"]["objectives"][agent_id] = []
+        self.state["mission"]["current_objectives"][agent_id] = None
+
+        # Robot state
+        self.state["robots"][agent_id] = {
+            "type": agent_type,
+            "position": None,
+            "heading": None,
+            "status": "idle",
+        }
+
+        # Execution state
+        self.state["execution"]["execution_states"][agent_id] = "IDLE"
+        self.state["execution"]["active_plans"][agent_id] = []
+        self.state["execution"]["current_skills"][agent_id] = None
+        self.state["execution"]["skill_queues"][agent_id] = []
+        self.state["execution"]["last_completed_skills"][agent_id] = None
+
+        # Memory
+        self.state["memory"]["visited_locations"][agent_id] = []
+        self.state["memory"]["failed_paths"][agent_id] = []
+        self.state["memory"]["event_logs"][agent_id] = []
+
     # MISSION MANAGEMENT
-
     def set_user_goal(self, goal):
-
         self.state["mission"]["user_goal"] = goal
 
-    def set_objectives(self, objectives):
+    def set_objectives(self, agent_id, objectives):  # CHANGED: Takes agent_id
+        self.state["mission"]["objectives"][agent_id] = objectives
 
-        self.state["mission"]["objectives"] = objectives
-
-    def set_current_objective(self, objective):
-
-        self.state["mission"]["current_objective"] = objective
+    def set_current_objective(self, agent_id, objective):  # CHANGED: Takes agent_id
+        self.state["mission"]["current_objectives"][agent_id] = objective
 
     def set_mission_status(self, status):
-
         self.state["mission"]["status"] = status
 
     # SEMANTIC STATE
@@ -66,33 +95,42 @@ class Blackboard:
     def add_reachable_target(self, target):
         self.state["semantic_state"]["reachable_targets"].append(target)
 
+    def add_discovered_target(self, target):
+        discovered = self.state["semantic_state"]["discovered_targets"]
+        if target not in discovered:
+            discovered.append(target)
+
     # EXECUTION STATE
-    def set_active_plan(self, plan):
-        self.state["execution"]["active_plan"] = plan
 
-    def set_skill_queue(self, queue):
-        self.state["execution"]["skill_queue"] = queue
+    def update_execution_state(self, agent_id, state):
+        self.state["execution"]["execution_states"][agent_id] = state
 
-    def set_active_skill(self, skill_name):
-        self.state["execution"]["active_skill"] = skill_name
+    def set_active_plan(self, agent_id, plan):
+        self.state["execution"]["active_plans"][agent_id] = plan
 
-    def set_last_completed_skill(self, skill_name):
-        self.state["execution"]["last_completed_skill"] = skill_name
+    def set_skill_queue(self, agent_id, queue):
+        self.state["execution"]["skill_queues"][agent_id] = queue
+
+    def set_current_skill(self, agent_id, skill_name):
+        self.state["execution"]["current_skills"][agent_id] = skill_name
+
+    def set_last_completed_skill(self, agent_id, skill_name):
+        self.state["execution"]["last_completed_skills"][agent_id] = skill_name
 
     # MEMORY SYSTEM
 
-    def remember_location(self, position):
-        self.state["memory"]["visited_locations"].append(
+    def remember_location(self, agent_id, position):
+        self.state["memory"]["visited_locations"][agent_id].append(
             {"position": position, "timestamp": round(self.supervisor.getTime(), 2)}
         )
 
-    def remember_failed_path(self, path_data):
-        self.state["memory"]["failed_paths"].append(
+    def remember_failed_path(self, agent_id, path_data):
+        self.state["memory"]["failed_paths"][agent_id].append(
             {"data": path_data, "timestamp": round(self.supervisor.getTime(), 2)}
         )
 
-    def remember_event(self, event):
-        self.state["memory"]["event_log"].append(
+    def remember_event(self, agent_id, event):
+        self.state["memory"]["event_logs"][agent_id].append(
             {"event": event, "timestamp": round(self.supervisor.getTime(), 2)}
         )
 
@@ -103,43 +141,32 @@ class Blackboard:
 
     # ROBOT STATE
 
-    def update_robot_state(self, position=None, heading=None, status=None):
-
+    def update_robot_state(self, agent_id, position=None, heading=None, status=None):
+        robot = self.state["robots"][agent_id]
         if position is not None:
-            self.state["robot"]["position"] = position
-
+            robot["position"] = position
         if heading is not None:
-            self.state["robot"]["heading"] = heading
-
+            robot["heading"] = heading
         if status is not None:
-            self.state["robot"]["status"] = status
+            robot["status"] = status
+
+    # WORLD STATE
+    def set_world_state(self, world_state):
+        self.state["world_state"] = world_state
 
     # RUNTIME
+
     def increment_tick(self):
         self.state["runtime"]["tick"] += 1
         self.state["runtime"]["last_update"] = round(self.supervisor.getTime(), 2)
 
-    def set_world_state(self, world_state):
-        self.state["world_state"] = world_state
-
     # ACCESSORS
 
     def get_state(self):
-
         return self.state
 
     def snapshot(self):
-        """
-        Deep copy snapshot for agents.
-        Prevents accidental mutation.
-        """
-
         return copy.deepcopy(self.state)
 
-    # ==================================================
-    # TELEMETRY FRIENDLY
-    # ==================================================
-
     def to_json(self):
-
         return json.dumps(self.snapshot())

@@ -4,11 +4,11 @@ import re
 AVAILABLE_SKILLS = {
     "SpinScanSkill": {
         "description": "Rotate in place and scan the environment.",
-        "params": ["duration_seconds"], # CHANGED
+        "params": ["duration_seconds"],  # CHANGED
     },
     "WanderSkill": {
         "description": "Move randomly through the environment.",
-        "params": ["duration_seconds"], # CHANGED
+        "params": ["duration_seconds"],  # CHANGED
     },
     "GoToTargetSkill": {
         "description": "Navigate toward a known target object.",
@@ -20,6 +20,7 @@ AVAILABLE_SKILLS = {
     },
 }
 
+
 class NavigatorAgent:
     def __init__(self, llm_client, pathfinder, max_retries=3, sio=None):
         self.llm_client = llm_client
@@ -30,13 +31,13 @@ class NavigatorAgent:
     # ==================================================
     # MAIN PIPELINE
     # ==================================================
-    def generate_plan(self, blackboard_snapshot):
+    def generate_plan(self, blackboard_snapshot, agent_id):
         # 1. Read context from the Blackboard
         mission = blackboard_snapshot.get("mission", {})
-        current_objective = mission.get("current_objective")
+        current_objective = mission.get("current_objectives", {}).get(agent_id)
         semantic_state = blackboard_snapshot.get("semantic_state", {})
         memory = blackboard_snapshot.get("memory", {})
-        robot = blackboard_snapshot.get("robot", {})
+        robot = blackboard_snapshot.get("robots", {}).get(agent_id, {})
         world_state = blackboard_snapshot.get("world_state", {})
 
         if not current_objective:
@@ -47,7 +48,7 @@ class NavigatorAgent:
 
         # 3. Build the tactical prompt
         prompt = self.build_prompt(
-            current_objective, semantic_state, memory, reachable_targets
+            current_objective, semantic_state, memory, reachable_targets, agent_id
         )
 
         # 4. LLM Query & Validation Loop
@@ -58,7 +59,7 @@ class NavigatorAgent:
                         "agent_log",
                         {
                             "agent": "Navigator",
-                            "message": "Evaluating tactical permutations...",
+                            "message": f"[{agent_id}] Evaluating tactical permutations...",
                         },
                     )
 
@@ -74,26 +75,26 @@ class NavigatorAgent:
                         "agent_log",
                         {
                             "agent": "Navigator",
-                            "message": f"Tactical plan secured. (Confidence: {conf*100}%)",
+                            "message": f"[{agent_id}] Tactical plan secured. (Confidence: {conf*100}%)",
                         },
                     )
 
                 return validated_plan
 
             except Exception as e:
-                print(f"[Navigator] Attempt {attempt + 1} failed: {e}")
+                print(f"[{agent_id} Navigator] Attempt {attempt + 1} failed: {e}")
                 prompt += (
                     f"\n\nSystem Error on previous attempt: {e}. Please fix the JSON."
                 )
 
         # 5. Fallback
-        print("[Navigator] CRITICAL: LLM failed to generate a valid plan.")
+        print(f"[{agent_id} Navigator] CRITICAL: LLM failed to generate a valid plan.")
         return {
             "confidence": 0.1,
             "plan": [
                 {
                     "skill": "WanderSkill",
-                    "parameters": {},
+                    "parameters": {"duration_seconds": 5},
                     "reason": "Fallback due to planning failure.",
                 }
             ],
@@ -125,7 +126,7 @@ class NavigatorAgent:
     # PROMPT ENGINEERING
     # ==================================================
     def build_prompt(
-        self, current_objective, semantic_state, memory, reachable_targets
+        self, current_objective, semantic_state, memory, reachable_targets, agent_id
     ):
         skill_descriptions = [
             f"- {k}: {v['description']} (Requires: {v['params']})"
@@ -133,7 +134,7 @@ class NavigatorAgent:
         ]
 
         # Extract failed events to prevent looping mistakes
-        recent_failures = memory.get("event_log", [])[-3:]
+        recent_failures = memory.get("event_logs", {}).get(agent_id, [])[-3:]
 
         return f"""
 You are the Navigator Agent of an autonomous robotics system.

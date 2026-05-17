@@ -8,7 +8,7 @@ class MissionDirector:
         self.sio = sio
 
     # MAIN ENTRY
-    def generate_objectives(self):
+    def generate_objectives(self, agent_id):
         snapshot = self.blackboard.snapshot()
         mission = snapshot["mission"]
         semantic = snapshot["semantic_state"]
@@ -16,15 +16,15 @@ class MissionDirector:
         response = self.llm_client.generate(prompt)
         objectives = self.parse_response(response)
 
-        self.blackboard.set_objectives(objectives)
-        self.blackboard.set_current_objective(objectives[0] if objectives else None)
-        self.log(f"Generated {len(objectives)} mission objectives.")
+        self.blackboard.set_objectives(agent_id, objectives)
+        self.blackboard.set_current_objective(
+            agent_id, objectives[0] if objectives else None
+        )
+        self.log(f"[{agent_id}] Generated {len(objectives)} mission objectives.")
         return objectives
 
     # PROMPT
-
     def build_prompt(self, mission, semantic):
-
         return f"""
             You are a robotics mission strategist.
 

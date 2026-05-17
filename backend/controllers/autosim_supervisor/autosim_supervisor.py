@@ -15,8 +15,15 @@ supervisor = Supervisor()
 TIME_STEP = int(supervisor.getBasicTimeStep())
 sio = socketio.Client()
 
+# ==========================================
+# MULTI-AGENT IDENTITY ASSIGNMENT
+# ==========================================
+# Read the controllerArgs passed from world_builder.py
+agent_id = sys.argv[1] if len(sys.argv) > 1 else "epuck_1"
+agent_type = "drone" if "drone" in agent_id.lower() else "ground"
+
 try:
-    print("[E-PUCK] Attempting to connect to Flask Command Center...")
+    print(f"[{agent_id.upper()}] Attempting to connect to Flask Command Center...")
     sio.connect("http://localhost:5000")
 except Exception as e:
     sys.exit(1)
@@ -24,7 +31,8 @@ except Exception as e:
 
 @sio.event
 def connect():
-    sio.emit("agent_log", {"agent": "E-Puck", "message": "Hardware online."})
+    # Tag telemetry with specific agent identity
+    sio.emit("agent_log", {"agent": agent_id, "message": "Hardware online."})
 
 
 # 1. Initialize hardware
@@ -34,8 +42,9 @@ proximity_sensors = []
 
 for i in range(8):
     sensor = supervisor.getDevice(f"ps{i}")
-    sensor.enable(TIME_STEP)
-    proximity_sensors.append(sensor)
+    if sensor:  # Safety check in case it's a drone without ps0-ps7
+        sensor.enable(TIME_STEP)
+        proximity_sensors.append(sensor)
 
 if left_motor and right_motor:
     left_motor.setPosition(float("inf"))
@@ -49,43 +58,53 @@ hardware_map = {
     "proximity_sensors": proximity_sensors,
 }
 
-print("[System] Booting LLM Engine...")
+print(f"[{agent_id.upper()}] Booting LLM Engine...")
 try:
     my_llm = GroqClient(model="openai/gpt-oss-120b")
 except Exception as e:
     sys.exit(1)
 
-
+# ==========================================
+# AGENT INSTANTIATIONS
+# ==========================================
 blackboard = Blackboard(supervisor)
+
+# Register THIS specific agent's memory partitions
+blackboard.register_agent(agent_id, agent_type=agent_type)
+
 world_tracker = WorldState(supervisor, proximity_sensors)
 executor = PlanExecutor(supervisor, sio, hardware_map)
-avoid_skill = AvoidObstacleSkill(
-    supervisor, sio, left_motor, right_motor, proximity_sensors
-)
+
+if left_motor and right_motor:
+    avoid_skill = AvoidObstacleSkill(
+        supervisor, sio, left_motor, right_motor, proximity_sensors
+    )
+
 global_pathfinder = AStarPathfinder(cell_size=0.1, obstacle_padding=0.25)
+
 perception = PerceptionAgent(blackboard, sio)
 director = MissionDirector(blackboard, my_llm, sio)
-
-# Inject the Tool into the Navigator!
 navigator = NavigatorAgent(llm_client=my_llm, pathfinder=global_pathfinder, sio=sio)
 
 
 def is_path_blocked(sensors):
     try:
-        return (sensors[7].getValue() + sensors[0].getValue()) > 300.0
+        if len(sensors) >= 8:
+            return (sensors[7].getValue() + sensors[0].getValue()) > 300.0
+        return False
     except Exception:
         return False
 
 
-# Initialize Mission on the Blackboard
+# Setup global user goal
 blackboard.set_user_goal("Scan the area, then find and move to TARGET_0.")
 blackboard.set_mission_status("needs_objectives")
 
 tick = 0
 
-
 # ==========================================
-# THE AGENTIC LOOP
+# THE HIERARCHICAL AGENTIC LOOP
+# ==========================================
 while supervisor.step(TIME_STEP) != -1:
     tick += 1
     blackboard.increment_tick()
@@ -93,70 +112,85 @@ while supervisor.step(TIME_STEP) != -1:
     # 1. RAW PHYSICS -> BLACKBOARD
     world_tracker.update(active_skill=executor.current_skill)
     raw_state = world_tracker.get_state()
-
-    # Update Blackboard with live physical data
     blackboard.set_world_state(raw_state)
+    # Update Robot state specific to THIS agent
     blackboard.update_robot_state(
+        agent_id,
         position=raw_state["robot"]["position"],
         heading=raw_state["robot"]["heading"],
         status=executor.status,
     )
+    # 2. WAKE THE ORACLE (Perception updates Semantic State)
+    perception.update(agent_id)
 
-    perception.update()
-
+    # 3. MISSION DIRECTOR (Strategy)
     if blackboard.state["mission"]["status"] == "needs_objectives":
-        left_motor.setVelocity(0)
-        right_motor.setVelocity(0)
+        if left_motor and right_motor:
+            left_motor.setVelocity(0)
+            right_motor.setVelocity(0)
 
-        print("\n[Brain] Waking Mission Director...")
-        director.generate_objectives()
+        print(f"\n[{agent_id.upper()} Brain] Waking Mission Director...")
+        director.generate_objectives(agent_id)
         blackboard.set_mission_status("needs_planning")
 
+    # 4. NAVIGATOR AGENT (Tactics)
     elif blackboard.state["mission"]["status"] == "needs_planning":
-        left_motor.setVelocity(0)
-        right_motor.setVelocity(0)
+        if left_motor and right_motor:
+            left_motor.setVelocity(0)
+            right_motor.setVelocity(0)
 
-        current_obj = blackboard.state["mission"]["current_objective"]
+        # Query Blackboard strictly for THIS agent's objective
+        current_obj = blackboard.state["mission"]["current_objectives"].get(agent_id)
+
         if current_obj:
-            # We now pass the ENTIRE snapshot! The Navigator handles its own extraction.
-            new_plan = navigator.generate_plan(blackboard.snapshot())
+            print(
+                f"\n[{agent_id.upper()} Brain] Waking Navigator for objective: {current_obj}"
+            )
 
-            blackboard.set_active_plan(new_plan.get("plan", []))
+            new_plan = navigator.generate_plan(blackboard.snapshot(), agent_id)
+
+            # Store active plan specific to THIS agent
+            blackboard.set_active_plan(agent_id, new_plan.get("plan", []))
             executor.load_plan(new_plan)
             blackboard.set_mission_status("executing")
         else:
             blackboard.set_mission_status("idle")
 
-    # THE ARBITER
-    if is_path_blocked(proximity_sensors):
+    # 5. ARBITER (Safety)
+    elif is_path_blocked(proximity_sensors):
         avoid_skill.update()
-        blackboard.update_robot_state(status="evading")
+        blackboard.update_robot_state(agent_id, status="evading")
+
+    # 6. EXECUTOR (Motors)
     elif blackboard.state["mission"]["status"] == "executing":
         status = executor.update()
 
         if status == "DONE":
-            print("[Executor] Objective complete.")
+            print(f"[{agent_id.upper()} Executor] Objective complete.")
 
-            objectives = blackboard.state["mission"]["objectives"]
+            # Pop the completed objective for THIS agent
+            objectives = blackboard.state["mission"]["objectives"].get(agent_id, [])
             if objectives:
                 objectives.pop(0)
 
             if objectives:
-                blackboard.set_current_objective(objectives[0])
+                blackboard.set_current_objective(agent_id, objectives[0])
                 blackboard.set_mission_status("needs_planning")
             else:
                 blackboard.set_mission_status("idle")
-                blackboard.set_current_objective(None)
+                blackboard.set_current_objective(agent_id, None)
                 print(
-                    "[Brain] All Mission Objectives Accomplished. Awaiting new orders."
+                    f"[{agent_id.upper()} Brain] All assigned Mission Objectives Accomplished."
                 )
 
         elif status == "FAILED":
-            # Total failure. Log it and ask the Director to rethink the whole strategy.
-            blackboard.remember_event(
-                f"Objective '{blackboard.state['mission']['current_objective']}' failed."
+            current_obj = blackboard.state["mission"]["current_objectives"].get(
+                agent_id
             )
-            print("[Executor] Plan failed! Triggering Strategic Replan...")
+            blackboard.remember_event(agent_id, f"Objective '{current_obj}' failed.")
+            print(
+                f"[{agent_id.upper()} Executor] Plan failed! Triggering Strategic Replan..."
+            )
             blackboard.set_mission_status("needs_objectives")
 
     # 7. TELEMETRY
