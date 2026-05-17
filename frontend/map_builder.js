@@ -54,8 +54,13 @@ const targetMat = new THREE.MeshLambertMaterial({ color: 0xf59e0b });
 // E-Puck visual (Green cylinder to represent the robot)
 const epuckGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.5, 16);
 const epuckMat = new THREE.MeshLambertMaterial({ color: 0x10b981 });
+const droneGeo = new THREE.BoxGeometry(0.7, 0.3, 0.7);
+const droneMat = new THREE.MeshLambertMaterial({
+    color: 0x3b82f6
+});
 
-let currentEpuck = null; // Track the single epuck instance
+let epuckCounter = 0;
+let currentDrone = null;
 
 // --- 4. Camera Controls ----------------------------------------------------
 
@@ -120,8 +125,13 @@ function handleInteraction(event) {
     // Erase
     if (currentTool === 'erase') {
         if (hit.object !== interactionPlane) {
+            if (hit.object.userData.type === 'drone') {
+                currentDrone = null;
+            }
             scene.remove(hit.object);
-            mapObjects = mapObjects.filter(obj => obj !== hit.object);
+            mapObjects = mapObjects.filter(
+                obj => obj !== hit.object
+            );
         }
         return;
     }
@@ -160,17 +170,47 @@ function handleInteraction(event) {
                 mesh.userData = { type: 'target' };
             }
             else if (currentTool === 'epuck') {
-                // Only ONE epuck allowed
-                if (currentEpuck) {
-                    scene.remove(currentEpuck);
-                    mapObjects = mapObjects.filter(obj => obj !== currentEpuck);
+
+                epuckCounter++;
+
+                mesh = new THREE.Mesh(
+                    epuckGeo,
+                    epuckMat
+                );
+
+                mesh.position.set(x, 0.25, z);
+
+                mesh.userData = {
+                    type: 'epuck',
+                    id: `epuck_${epuckCounter}`
+                };
+            }
+
+            else if (currentTool === 'drone') {
+
+                // Highlander Rule
+                if (currentDrone) {
+
+                    scene.remove(currentDrone);
+
+                    mapObjects = mapObjects.filter(
+                        obj => obj !== currentDrone
+                    );
                 }
 
-                mesh = new THREE.Mesh(epuckGeo, epuckMat);
-                mesh.position.set(x, 0.25, z);
-                mesh.userData = { type: 'epuck' };
+                mesh = new THREE.Mesh(
+                    droneGeo,
+                    droneMat
+                );
 
-                currentEpuck = mesh;
+                mesh.position.set(x, 2.0, z);
+
+                mesh.userData = {
+                    type: 'drone',
+                    id: 'drone_1'
+                };
+
+                currentDrone = mesh;
             }
 
             if (mesh) {
@@ -267,6 +307,8 @@ document.querySelectorAll('.tool-btn').forEach(btn => {
 document.getElementById('clear-map-btn').addEventListener('click', () => {
     mapObjects.forEach(obj => scene.remove(obj));
     mapObjects = [];
+    currentDrone = null;
+    epuckCounter = 0;
 });
 
 // --- 8. Render Loop --------------------------------------------------------
@@ -281,7 +323,7 @@ animate();
 // --- 9. Data Export API ----------------------------------------------------
 // Expose a function to grab the map configuration for the Flask backend
 window.exportMapData = function () {
-    const mapData = { walls: [], targets: [], epuck: null };
+    const mapData = { walls: [], targets: [], epucks: [], drone: null };
 
     mapObjects.forEach(obj => {
         if (obj.userData.type === 'wall') {
@@ -291,13 +333,17 @@ window.exportMapData = function () {
             mapData.targets.push({ x: obj.position.x, z: obj.position.z });
         }
         else if (obj.userData.type === 'epuck') {
-            mapData.epuck = { x: obj.position.x, z: obj.position.z };
+            mapData.epucks.push({ id: obj.userData.id, x: obj.position.x, z: obj.position.z });
+        }
+
+        else if (obj.userData.type === 'drone') {
+            mapData.drone = { id: obj.userData.id, x: obj.position.x, z: obj.position.z };
         }
     });
 
-    // fallback safety
-    if (!mapData.epuck) {
-        mapData.epuck = { x: 0, z: 0 };
+    // Safety fallback
+    if (mapData.epucks.length === 0) {
+        mapData.epucks.push({ id: 'epuck_1', x: 0, z: 0 });
     }
 
     return mapData;

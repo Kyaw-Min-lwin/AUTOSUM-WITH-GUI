@@ -17,6 +17,7 @@ def generate_wbt(map_data: dict, filepath: str = "worlds/temp_run.wbt"):
         'EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"',
         'EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/floors/protos/RectangleArena.proto"',
         'EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/robots/gctronic/e-puck/protos/E-puck.proto"',
+        'EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/robots/bitcraze/crazyflie/protos/Crazyflie.proto"',
         # Explicitly define the ENU coordinate system (X, Y = floor, Z = up)
         'Project { controllerDir "../controllers" }',
         'WorldInfo { basicTimeStep 32 coordinateSystem "ENU" }',
@@ -71,19 +72,44 @@ def generate_wbt(map_data: dict, filepath: str = "worlds/temp_run.wbt"):
             ]
         }}""")
 
-    # 3. E-puck
-    epuck_pos = map_data.get("epuck") or {"x": 0, "z": 0}
-    ex = round(epuck_pos.get("x", 0)) * SCALE
-    ey = round(epuck_pos.get("z", 0)) * SCALE
-    wbt_content.append(f"""
-    E-puck {{
-        translation {ex} {ey} 0.01
-        controller "autosim_supervisor"
-        name "e-puck"
-        supervisor TRUE
-    }}
-    """)
-    #
+    # 3. E-pucks (Swarm)
+    for epuck in map_data.get("epucks", []):
+        epuck_id = epuck.get("id", "epuck_0")
+
+        # FIX: Apply SCALE and map JS Z to Webots Y
+        ex = round(epuck.get("x", 0)) * SCALE
+        ey = round(epuck.get("z", 0)) * SCALE
+
+        # FIX: Use .append() instead of +=
+        wbt_content.append(f"""
+        DEF {epuck_id.upper()} E-puck {{
+            translation {ex} {ey} 0.01
+            rotation 0 0 1 0
+            controller "autosim_supervisor"
+            controllerArgs [ "{epuck_id}" ]
+            name "{epuck_id}"
+            supervisor TRUE
+        }}""")
+
+    # 4. Drone
+    drone = map_data.get("drone")
+    if drone:
+        drone_id = drone.get("id", "drone_1")
+
+        # FIX: Apply SCALE and map JS Z to Webots Y
+        dx = round(drone.get("x", 0)) * SCALE
+        dy = round(drone.get("z", 0)) * SCALE
+
+        # FIX: Use .append() instead of +=
+        wbt_content.append(f"""
+        DEF {drone_id.upper()} Crazyflie {{
+            translation {dx} {dy} 0.2
+            rotation 0 0 1 0
+            controller "autosim_supervisor"
+            controllerArgs [ "{drone_id}" ]
+            name "{drone_id}"
+            supervisor TRUE
+        }}""")
     # Write file
     full_path = os.path.join(BACKEND_DIR, filepath)
     full_path = os.path.abspath(full_path)
