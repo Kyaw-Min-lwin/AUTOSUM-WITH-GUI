@@ -73,7 +73,7 @@ blackboard = Blackboard(supervisor)
 blackboard.register_agent(agent_id, agent_type=agent_type)
 
 world_tracker = WorldState(supervisor, proximity_sensors)
-executor = PlanExecutor(supervisor, sio, hardware_map)
+executor = PlanExecutor(agent_id, supervisor, sio, hardware_map)
 
 if left_motor and right_motor:
     avoid_skill = AvoidObstacleSkill(
@@ -122,6 +122,8 @@ while supervisor.step(TIME_STEP) != -1:
     )
     # 2. WAKE THE ORACLE (Perception updates Semantic State)
     perception.update(agent_id)
+    if agent_type == "drone":
+        perception.check_aerial_recon(blackboard, supervisor, agent_id)
 
     # 3. MISSION DIRECTOR (Strategy)
     if blackboard.state["mission"]["status"] == "needs_objectives":

@@ -26,17 +26,71 @@ class PerceptionAgent:
             if obj["type"] == "wall":
                 blocked_zones.append(semantic["quadrant"])
 
+        recon_status = self.blackboard.state["semantic_state"].get("recon_complete", False)
         semantic_state = {
             "identified_objects": semantic_objects,
             "blocked_quadrants": list(set(blocked_zones)),
             "summary": self.generate_summary(semantic_objects, blocked_zones),
+            "recon_complete": recon_status,
+            "discovered_targets": self.blackboard.state["semantic_state"].get("discovered_targets", [])
         }
 
         self.blackboard.state["semantic_state"] = semantic_state
         if semantic_state["summary"] != self.last_summary:
-            self.log(semantic_state["summary"])
+            self.log(f"[{agent_id.upper()}] {semantic_state['summary']}")
             self.last_summary = semantic_state["summary"]
 
+    # AERIAL RECON TRIGGER
+    def check_aerial_recon(self, blackboard, supervisor, drone_id="drone_1"):
+        """Watches the drone altitude and unlocks the map for the swarm."""
+        # 1. If already did the recon, do nothing.
+        if blackboard.state["semantic_state"].get("recon_complete", False):
+            return
+
+        # 2. Grab the drone node
+        drone_node = supervisor.getFromDef(drone_id.upper())
+        if not drone_node:
+            return
+
+        # 3. Check Z-coordinate (Altitude in Webots ENU)
+        altitude = drone_node.getPosition()[2]
+
+        # 4. THE TRIGGER
+        if altitude >= 2.8:
+            targets_found = 0
+            
+            # Query the Webots tree dynamically
+            root = supervisor.getRoot()
+            children = root.getField("children")
+            
+            for i in range(children.getCount()):
+                node = children.getMFNode(i)
+                if node and node.getDef() and node.getDef().startswith("TARGET_"):
+                    pos = node.getPosition()
+                    
+                    target_data = {
+                        "id": node.getDef(),
+                        "type": "target",
+                        "position": [round(pos[0], 3), round(pos[1], 3)]
+                    }
+                    
+                    # Write to the global Blackboard memory!
+                    blackboard.add_discovered_target(target_data)
+                    targets_found += 1
+
+            # Lock the trigger so it doesn't fire again
+            blackboard.state["semantic_state"]["recon_complete"] = True
+
+            # 5. THE FLASHY OUTPUT
+            if self.sio:
+                self.sio.emit(
+                    "agent_log",
+                    {
+                        "agent": "Oracle",
+                        "message": f"AERIAL SCAN COMPLETE. {targets_found} TARGETS ACQUIRED. UPLOADING COORDINATES TO SWARM BLACKBOARD."
+                    }
+                )
+                
     # ==================================================
     # OBJECT INTERPRETATION
     # ==================================================
@@ -68,7 +122,6 @@ class PerceptionAgent:
         return "South-East"
 
     # SEMANTIC SUMMARY
-
     def generate_summary(self, objects, blocked):
         targets = [o for o in objects if o["type"] == "target"]
         walls = [o for o in objects if o["type"] == "wall"]
@@ -82,7 +135,5 @@ class PerceptionAgent:
 
     # LOGGING
     def log(self, message):
-
         if self.sio:
-
             self.sio.emit("agent_log", {"agent": "Oracle", "message": message})
