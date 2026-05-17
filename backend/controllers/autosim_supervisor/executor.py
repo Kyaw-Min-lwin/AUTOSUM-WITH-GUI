@@ -18,6 +18,26 @@ class PlanExecutor:
         self.current_skill = None
         self.status = "IDLE"
 
+        # AUTO-DEPLOY DRONE BYPASS
+        if "drone" in self.agent_id.lower():
+            self.plan_queue = [
+                {
+                    "skill": "AerialScanSkill",
+                    "parameters": {},
+                    "reason": "Auto-deployed pre-mission intelligence.",
+                }
+            ]
+            self.status = "RUNNING"
+
+            if self.sio:
+                self.sio.emit(
+                    "agent_log",
+                    {
+                        "agent": self.agent_id,
+                        "message": "Auto-deploying AerialScanSkill for pre-mission intelligence.",
+                    },
+                )
+
     def load_plan(self, plan_dict):
         """Loads a validated JSON plan from the Planner."""
         self.plan_queue = plan_dict.get("plan", [])
@@ -40,6 +60,18 @@ class PlanExecutor:
 
         # 1. If no skill is running, load the next one
         if self.current_skill is None:
+            # if "drone" in self.agent_id.lower():
+            #     skill = {
+            #         "confidence": 0.9,
+            #         "plan": [
+            #             {
+            #                 "skill": "AerialScanSkill",
+            #                 "parameters": {},
+            #                 "reason": "Aerial Drone Skill",
+            #             }
+            #         ],
+            #     }
+            #     self.plan_queue.append(skill)
             if not self.plan_queue:
                 self.status = "DONE"
                 return self.status
@@ -149,7 +181,7 @@ class PlanExecutor:
                 return
 
             self.current_skill = PatrolSkill(
-                agent_id=self.agent_id,  # <--- ADDED
+                agent_id=self.agent_id,
                 supervisor=self.supervisor,
                 sio=self.sio,
                 left_motor=self.hardware_map["left_motor"],

@@ -12,6 +12,18 @@ class MissionDirector:
         snapshot = self.blackboard.snapshot()
         mission = snapshot["mission"]
         semantic = snapshot["semantic_state"]
+
+        robot_type = snapshot.get("robots", {}).get(agent_id, {}).get("type", "ground")
+        recon_complete = semantic.get("recon_complete", False)
+
+        if robot_type == "ground" and not recon_complete:
+            self.log(
+                f"[{agent_id.upper()}] Awaiting aerial intelligence before dispatching ground units..."
+            )
+
+            self.blackboard.set_objectives(agent_id, [])
+            self.blackboard.set_current_objective(agent_id, None)
+            return []
         prompt = self.build_prompt(mission, semantic)
         response = self.llm_client.generate(prompt)
         objectives = self.parse_response(response)

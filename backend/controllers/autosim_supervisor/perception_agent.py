@@ -26,13 +26,17 @@ class PerceptionAgent:
             if obj["type"] == "wall":
                 blocked_zones.append(semantic["quadrant"])
 
-        recon_status = self.blackboard.state["semantic_state"].get("recon_complete", False)
+        recon_status = self.blackboard.state["semantic_state"].get(
+            "recon_complete", False
+        )
         semantic_state = {
             "identified_objects": semantic_objects,
             "blocked_quadrants": list(set(blocked_zones)),
             "summary": self.generate_summary(semantic_objects, blocked_zones),
             "recon_complete": recon_status,
-            "discovered_targets": self.blackboard.state["semantic_state"].get("discovered_targets", [])
+            "discovered_targets": self.blackboard.state["semantic_state"].get(
+                "discovered_targets", []
+            ),
         }
 
         self.blackboard.state["semantic_state"] = semantic_state
@@ -41,56 +45,67 @@ class PerceptionAgent:
             self.last_summary = semantic_state["summary"]
 
     # AERIAL RECON TRIGGER
-    def check_aerial_recon(self, blackboard, supervisor, drone_id="drone_1"):
+    def check_aerial_recon(self, blackboard, supervisor, agent_id, drone_id="drone_1"):
         """Watches the drone altitude and unlocks the map for the swarm."""
         # 1. If already did the recon, do nothing.
         if blackboard.state["semantic_state"].get("recon_complete", False):
+            print(f'{blackboard.state["semantic_state"]} recon false triggering')
             return
 
         # 2. Grab the drone node
         drone_node = supervisor.getFromDef(drone_id.upper())
         if not drone_node:
+            print("No drone node triggerring")
             return
 
         # 3. Check Z-coordinate (Altitude in Webots ENU)
         altitude = drone_node.getPosition()[2]
 
         # 4. THE TRIGGER
-        if altitude >= 2.8:
+        if altitude >= 0.8:
             targets_found = 0
-            
+
             # Query the Webots tree dynamically
             root = supervisor.getRoot()
             children = root.getField("children")
-            
+
             for i in range(children.getCount()):
                 node = children.getMFNode(i)
                 if node and node.getDef() and node.getDef().startswith("TARGET_"):
                     pos = node.getPosition()
-                    
+
                     target_data = {
                         "id": node.getDef(),
                         "type": "target",
-                        "position": [round(pos[0], 3), round(pos[1], 3)]
+                        "position": [round(pos[0], 3), round(pos[1], 3)],
                     }
-                    
+
                     # Write to the global Blackboard memory!
                     blackboard.add_discovered_target(target_data)
                     targets_found += 1
 
             # Lock the trigger so it doesn't fire again
             blackboard.state["semantic_state"]["recon_complete"] = True
+            robot_type = (
+                blackboard.state["robots"].get(agent_id, {}).get("type", "ground")
+            )
 
-            # 5. THE FLASHY OUTPUT
-            if self.sio:
-                self.sio.emit(
-                    "agent_log",
-                    {
-                        "agent": "Oracle",
-                        "message": f"AERIAL SCAN COMPLETE. {targets_found} TARGETS ACQUIRED. UPLOADING COORDINATES TO SWARM BLACKBOARD."
-                    }
-                )
-                
+            if robot_type == "ground":
+                # WAKE UP THE GROUND SWARM!
+                # (We do NOT wake the drone, otherwise it stops hovering and drops!)
+                blackboard.set_mission_status("needs_objectives")
+
+            elif robot_type == "drone":
+                # ONLY let the drone print the flashy output to avoid duplicate UI logs
+                if self.sio:
+                    self.sio.emit(
+                        "agent_log",
+                        {
+                            "agent": "Oracle",
+                            "message": f"AERIAL SCAN COMPLETE. {targets_found} TARGETS ACQUIRED. UPLOADING COORDINATES TO SWARM BLACKBOARD.",
+                        },
+                    )
+
     # ==================================================
     # OBJECT INTERPRETATION
     # ==================================================
@@ -116,9 +131,12 @@ class PerceptionAgent:
     # QUADRANT CLASSIFICATION
 
     def determine_quadrant(self, dx, dy):
-        if dx >= 0 and dy >= 0: return "North-East"
-        elif dx < 0 and dy >= 0: return "North-West"
-        elif dx < 0 and dy < 0: return "South-West"
+        if dx >= 0 and dy >= 0:
+            return "North-East"
+        elif dx < 0 and dy >= 0:
+            return "North-West"
+        elif dx < 0 and dy < 0:
+            return "South-West"
         return "South-East"
 
     # SEMANTIC SUMMARY

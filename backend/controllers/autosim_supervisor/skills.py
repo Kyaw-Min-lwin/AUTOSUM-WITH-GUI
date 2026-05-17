@@ -508,9 +508,17 @@ class AerialScanSkill(BaseSkill):
                 f"CRITICAL: Drone node '{agent_id.upper()}' not found in the Webots world!"
             )
         self.translation_field = self.drone_node.getField("translation")
-        self.target_altitude = 3.0
+        self.rotation_field = self.drone_node.getField("rotation")
+        self.sweep_altitude = 0.7
+        self.trigger_altitude = 0.8
         self.ascent_speed = 0.015
         self._is_complete = False
+
+        TIME_STEP = int(self.supervisor.getBasicTimeStep())
+        self.sweep_ticks = int(2000.0 / TIME_STEP)
+        self.sweep_speed = (2 * math.pi) / self.sweep_ticks
+        self.current_sweep_tick = 0
+        self.phase = "ASCEND"  # States: ASCEND, SWEEP, ASCEND_FINAL, HOVER
 
     def start(self):
         super().start()
@@ -522,24 +530,58 @@ class AerialScanSkill(BaseSkill):
 
     def update(self):
         position = self.translation_field.getSFVec3f()
-        x = position[0]
-        y = position[1]
-        z = position[2]
+        rotation = self.rotation_field.getSFRotation()
+        x, y, z = position[0], position[1], position[2]
+        rx, ry, rz, angle = rotation[0], rotation[1], rotation[2], rotation[3]
 
-        # CHANGED: Webots ENU coordinates map altitude to the Z axis!
-        if z < self.target_altitude:
-            z += self.ascent_speed
-            self.translation_field.setSFVec3f([x, y, z])
-        else:
-            self._is_complete = True
-            if self.sio:
-                self.sio.emit(
-                    "agent_log",
-                    {
-                        "agent": self.agent_id,
-                        "message": "Aerial scan altitude reached.",
-                    },
-                )
+        if self.phase == "ASCEND":
+            if z < self.sweep_altitude:
+                z += self.ascent_speed
+                self.translation_field.setSFVec3f([x, y, z])
+            else:
+                self.phase = "SWEEP"
+                if self.sio:
+                    self.sio.emit(
+                        "agent_log",
+                        {
+                            "agent": self.agent_id,
+                            "message": "Altitude reached. Commencing 360-degree camera sweep.",
+                        },
+                    )
+
+        elif self.phase == "SWEEP":
+            if self.current_sweep_tick < self.sweep_ticks:
+                angle += self.sweep_speed
+                # Enforce rotation exactly around the Z axis
+                self.rotation_field.setSFRotation([0, 0, 1, angle])
+                self.current_sweep_tick += 1
+
+                # Keep holding altitude during the spin
+                self.translation_field.setSFVec3f([x, y, z])
+            else:
+                self.phase = "ASCEND_FINAL"
+                if self.sio:
+                    self.sio.emit(
+                        "agent_log",
+                        {
+                            "agent": self.agent_id,
+                            "message": "Sweep complete. Locking altitude to trigger Oracle.",
+                        },
+                    )
+
+        elif self.phase == "ASCEND_FINAL":
+            if z < self.trigger_altitude:
+                z += self.ascent_speed
+                self.translation_field.setSFVec3f([x, y, z])
+            else:
+                self.phase = "HOVER"
+
+        elif self.phase == "HOVER":
+            # Lock position so it never falls
+            self.translation_field.setSFVec3f([x, y, self.trigger_altitude])
+
+        # ALWAYS kill accumulated gravity so it glides and hovers smoothly
+        self.drone_node.resetPhysics()
 
     def is_complete(self):
-        return self._is_complete
+        return False

@@ -36,22 +36,27 @@ def connect():
 
 
 # 1. Initialize hardware
-left_motor = supervisor.getDevice("left wheel motor")
-right_motor = supervisor.getDevice("right wheel motor")
+left_motor = None
+right_motor = None
 proximity_sensors = []
 
-for i in range(8):
-    sensor = supervisor.getDevice(f"ps{i}")
-    if sensor:  # Safety check in case it's a drone without ps0-ps7
-        sensor.enable(TIME_STEP)
-        proximity_sensors.append(sensor)
+if agent_type == "ground":
+    left_motor = supervisor.getDevice("left wheel motor")
+    right_motor = supervisor.getDevice("right wheel motor")
 
-if left_motor and right_motor:
-    left_motor.setPosition(float("inf"))
-    right_motor.setPosition(float("inf"))
-    left_motor.setVelocity(0.0)
-    right_motor.setVelocity(0.0)
+    for i in range(8):
+        sensor = supervisor.getDevice(f"ps{i}")
+        if sensor:
+            sensor.enable(TIME_STEP)
+            proximity_sensors.append(sensor)
 
+    if left_motor and right_motor:
+        left_motor.setPosition(float("inf"))
+        right_motor.setPosition(float("inf"))
+        left_motor.setVelocity(0.0)
+        right_motor.setVelocity(0.0)
+
+# Build the map (Drone will just have None/Empty lists, which is perfectly safe!)
 hardware_map = {
     "left_motor": left_motor,
     "right_motor": right_motor,
@@ -77,7 +82,7 @@ executor = PlanExecutor(agent_id, supervisor, sio, hardware_map)
 
 if left_motor and right_motor:
     avoid_skill = AvoidObstacleSkill(
-        supervisor, sio, left_motor, right_motor, proximity_sensors
+        agent_id, supervisor, sio, left_motor, right_motor, proximity_sensors
     )
 
 global_pathfinder = AStarPathfinder(cell_size=0.1, obstacle_padding=0.25)
@@ -98,7 +103,12 @@ def is_path_blocked(sensors):
 
 # Setup global user goal
 blackboard.set_user_goal("Scan the area, then find and move to TARGET_0.")
-blackboard.set_mission_status("needs_objectives")
+if agent_type == "drone":
+    # The drone skips planning and immediately runs its auto-deployed AerialScanSkill
+    blackboard.set_mission_status("executing")
+else:
+    # Ground units wait for the Director and the Drone
+    blackboard.set_mission_status("needs_objectives")
 
 tick = 0
 
@@ -122,8 +132,7 @@ while supervisor.step(TIME_STEP) != -1:
     )
     # 2. WAKE THE ORACLE (Perception updates Semantic State)
     perception.update(agent_id)
-    if agent_type == "drone":
-        perception.check_aerial_recon(blackboard, supervisor, agent_id)
+    perception.check_aerial_recon(blackboard, supervisor, agent_id)
 
     # 3. MISSION DIRECTOR (Strategy)
     if blackboard.state["mission"]["status"] == "needs_objectives":
@@ -170,20 +179,26 @@ while supervisor.step(TIME_STEP) != -1:
         if status == "DONE":
             print(f"[{agent_id.upper()} Executor] Objective complete.")
 
-            # Pop the completed objective for THIS agent
-            objectives = blackboard.state["mission"]["objectives"].get(agent_id, [])
-            if objectives:
-                objectives.pop(0)
-
-            if objectives:
-                blackboard.set_current_objective(agent_id, objectives[0])
-                blackboard.set_mission_status("needs_planning")
-            else:
+            if agent_type == "drone":
                 blackboard.set_mission_status("idle")
-                blackboard.set_current_objective(agent_id, None)
                 print(
-                    f"[{agent_id.upper()} Brain] All assigned Mission Objectives Accomplished."
+                    f"[{agent_id.upper()} Brain] Aerial Recon complete. Holding position."
                 )
+            else:
+                # Pop the completed objective for THIS agent
+                objectives = blackboard.state["mission"]["objectives"].get(agent_id, [])
+                if objectives:
+                    objectives.pop(0)
+
+                if objectives:
+                    blackboard.set_current_objective(agent_id, objectives[0])
+                    blackboard.set_mission_status("needs_planning")
+                else:
+                    blackboard.set_mission_status("idle")
+                    blackboard.set_current_objective(agent_id, None)
+                    print(
+                        f"[{agent_id.upper()} Brain] All assigned Mission Objectives Accomplished."
+                    )
 
         elif status == "FAILED":
             current_obj = blackboard.state["mission"]["current_objectives"].get(
