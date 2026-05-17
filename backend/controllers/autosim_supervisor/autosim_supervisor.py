@@ -102,7 +102,7 @@ def is_path_blocked(sensors):
 
 
 # Setup global user goal
-blackboard.set_user_goal("Scan the area, then find and move to TARGET_0.")
+blackboard.set_user_goal("epuck_1 finds TARGET_0. epuck_2 wanders and explores")
 if agent_type == "drone":
     # The drone skips planning and immediately runs its auto-deployed AerialScanSkill
     blackboard.set_mission_status("executing")

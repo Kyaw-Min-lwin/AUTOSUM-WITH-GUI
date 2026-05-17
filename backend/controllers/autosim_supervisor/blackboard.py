@@ -13,6 +13,7 @@ class Blackboard:
                 "status": "idle",
                 "objectives": {},
                 "current_objectives": {},
+                "dispatched": {},
             },
             # GLOBAL SEMANTIC STATE
             "semantic_state": {
@@ -50,6 +51,7 @@ class Blackboard:
         # Mission state
         self.state["mission"]["objectives"][agent_id] = []
         self.state["mission"]["current_objectives"][agent_id] = None
+        self.state["mission"]["dispatched"][agent_id] = False
 
         # Robot state
         self.state["robots"][agent_id] = {
