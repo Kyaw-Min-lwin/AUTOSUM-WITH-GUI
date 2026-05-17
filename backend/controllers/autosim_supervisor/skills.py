@@ -2,8 +2,11 @@ import random
 import math
 from pathfinder import AStarPathfinder
 
+
 class BaseSkill:
-    def __init__(self, supervisor, sio, left_motor, right_motor):
+
+    def __init__(self, agent_id, supervisor, sio, left_motor, right_motor):
+        self.agent_id = agent_id
         self.supervisor = supervisor
         self.sio = sio
         self.left_motor = left_motor
@@ -15,7 +18,7 @@ class BaseSkill:
             self.sio.emit(
                 "agent_log",
                 {
-                    "agent": "SkillSystem",
+                    "agent": self.agent_id,
                     "message": f"Activating skill: {self.__class__.__name__}",
                 },
             )
@@ -29,7 +32,7 @@ class BaseSkill:
             self.sio.emit(
                 "agent_log",
                 {
-                    "agent": "SkillSystem",
+                    "agent": self.agent_id,
                     "message": f"Terminated skill: {self.__class__.__name__}",
                 },
             )
@@ -38,8 +41,9 @@ class BaseSkill:
         return False
 
     def set_wheel_speeds(self, left: float, right: float):
-        self.left_motor.setVelocity(left)
-        self.right_motor.setVelocity(right)
+        if self.left_motor and self.right_motor:
+            self.left_motor.setVelocity(left)
+            self.right_motor.setVelocity(right)
 
 
 class SpinScanSkill(BaseSkill):
@@ -50,6 +54,7 @@ class SpinScanSkill(BaseSkill):
 
     def __init__(
         self,
+        agent_id,
         supervisor,
         sio,
         left_motor,
@@ -57,7 +62,7 @@ class SpinScanSkill(BaseSkill):
         duration_ticks: int = 100,
         rotation_speed: float = 1.5,
     ):
-        super().__init__(supervisor, sio, left_motor, right_motor)
+        super().__init__(agent_id, supervisor, sio, left_motor, right_motor)
         self.duration_ticks = duration_ticks
         self.rotation_speed = rotation_speed
         self.current_tick = 0
@@ -68,20 +73,17 @@ class SpinScanSkill(BaseSkill):
         self.current_tick = 0
 
     def update(self):
-        """Apply spin velocities and increment the internal timer."""
-        # Route through the abstraction layer, NEVER directly to motor.setVelocity
         self.set_wheel_speeds(self.rotation_speed, -self.rotation_speed)
         self.current_tick += 1
 
     def is_complete(self):
-        """Signal to the supervisor when the scan duration is fulfilled."""
         return self.current_tick >= self.duration_ticks
 
 
 class WanderSkill(BaseSkill):
-
     def __init__(
         self,
+        agent_id,
         supervisor,
         sio,
         left_motor,
@@ -92,7 +94,7 @@ class WanderSkill(BaseSkill):
         obstacle_threshold=150.0,
         duration_ticks=300,
     ):
-        super().__init__(supervisor, sio, left_motor, right_motor)
+        super().__init__(agent_id, supervisor, sio, left_motor, right_motor)
         self.proximity_sensors = proximity_sensors or []
         self.forward_speed = forward_speed
         self.turn_speed = turn_speed
@@ -108,7 +110,10 @@ class WanderSkill(BaseSkill):
         if self.sio:
             self.sio.emit(
                 "agent_log",
-                {"agent": "WanderSkill", "message": "Exploration routine initialized."},
+                {
+                    "agent": self.agent_id,
+                    "message": "Exploration routine initialized.",
+                },
             )
 
     def update(self):
@@ -116,6 +121,7 @@ class WanderSkill(BaseSkill):
         if self.current_tick > self.duration_ticks:
             self.set_wheel_speeds(0.0, 0.0)
             return
+
         if self.state == "turning":
             self.set_wheel_speeds(self.turn_speed, -self.turn_speed)
             self.turn_ticks_remaining -= 1
@@ -125,7 +131,7 @@ class WanderSkill(BaseSkill):
                     self.sio.emit(
                         "agent_log",
                         {
-                            "agent": "WanderSkill",
+                            "agent": self.agent_id,
                             "message": "Turn complete. Resuming forward.",
                         },
                     )
@@ -138,7 +144,7 @@ class WanderSkill(BaseSkill):
                 self.sio.emit(
                     "agent_log",
                     {
-                        "agent": "WanderSkill",
+                        "agent": self.agent_id,
                         "message": f"Obstacle detected. Evading ({self.turn_ticks_remaining} ticks).",
                     },
                 )
@@ -162,8 +168,10 @@ class WanderSkill(BaseSkill):
 
 
 class AvoidObstacleSkill(BaseSkill):
+
     def __init__(
         self,
+        agent_id,
         supervisor,
         sio,
         left_motor,
@@ -173,7 +181,7 @@ class AvoidObstacleSkill(BaseSkill):
         forward_speed=2.5,
         turn_speed=2.0,
     ):
-        super().__init__(supervisor, sio, left_motor, right_motor)
+        super().__init__(agent_id, supervisor, sio, left_motor, right_motor)
         self.proximity_sensors = proximity_sensors
         self.obstacle_threshold = obstacle_threshold
         self.forward_speed = forward_speed
@@ -185,7 +193,7 @@ class AvoidObstacleSkill(BaseSkill):
             self.sio.emit(
                 "agent_log",
                 {
-                    "agent": "AvoidObstacleSkill",
+                    "agent": self.agent_id,
                     "message": "Reactive collision avoidance online.",
                 },
             )
@@ -230,9 +238,9 @@ class AvoidObstacleSkill(BaseSkill):
 
 
 class GoToTargetSkill(BaseSkill):
-
     def __init__(
         self,
+        agent_id,
         supervisor,
         sio,
         left_motor,
@@ -241,24 +249,22 @@ class GoToTargetSkill(BaseSkill):
         forward_speed=3.0,
         turn_speed=1.5,
         angle_tolerance=0.2,
-        distance_tolerance=0.1,  # Tolerance for the final target
+        distance_tolerance=0.1,
     ):
-        super().__init__(supervisor, sio, left_motor, right_motor)
+        super().__init__(agent_id, supervisor, sio, left_motor, right_motor)
         self.target_node = target_node
         self.forward_speed = forward_speed
         self.turn_speed = turn_speed
         self.angle_tolerance = angle_tolerance
         self.distance_tolerance = distance_tolerance
 
-        self.waypoint_tolerance = 0.1  # looser tolerance for intermediate grid points
-        self.path = []  # This will hold our A* waypoints
+        self.waypoint_tolerance = 0.1
+        self.path = []
 
         self.arrived = False
         self.failed = False
         self.ticks_elapsed = 0
-        self.max_ticks = (
-            2500  # Increased because pathfinding takes longer than a straight line
-        )
+        self.max_ticks = 2500
 
     def start(self):
         super().start()
@@ -266,7 +272,6 @@ class GoToTargetSkill(BaseSkill):
         robot_pos = self.get_robot_position()
         target_pos = self.get_target_position()
 
-        # 1. Grab all walls from the Webots scene tree dynamically
         obstacle_positions = []
         root = self.supervisor.getRoot()
         children = root.getField("children")
@@ -280,23 +285,21 @@ class GoToTargetSkill(BaseSkill):
             self.sio.emit(
                 "agent_log",
                 {
-                    "agent": "Pathfinder",
+                    "agent": self.agent_id,
                     "message": f"Calculating A* route around {len(obstacle_positions)} obstacles...",
                 },
             )
 
-        # 2. Run the A* algorithm
         pathfinder = AStarPathfinder(cell_size=0.1, obstacle_padding=0.04)
         self.path = pathfinder.find_path(robot_pos, target_pos, obstacle_positions)
 
         if not self.path:
-            # If A* fails (target enclosed in walls), trigger failure immediately
             self.failed = True
             if self.sio:
                 self.sio.emit(
                     "agent_log",
                     {
-                        "agent": "GoToTargetSkill",
+                        "agent": self.agent_id,
                         "message": "CRITICAL: No valid path to target.",
                     },
                 )
@@ -305,7 +308,7 @@ class GoToTargetSkill(BaseSkill):
                 self.sio.emit(
                     "agent_log",
                     {
-                        "agent": "GoToTargetSkill",
+                        "agent": self.agent_id,
                         "message": f"Path found with {len(self.path)} steps. Engaging motors.",
                     },
                 )
@@ -319,7 +322,7 @@ class GoToTargetSkill(BaseSkill):
             if self.sio:
                 self.sio.emit(
                     "agent_log",
-                    {"agent": "GoToTarget", "message": "Navigation timed out."},
+                    {"agent": self.agent_id, "message": "Navigation timed out."},
                 )
             return
 
@@ -330,7 +333,6 @@ class GoToTargetSkill(BaseSkill):
         robot_pos = self.get_robot_position()
         robot_heading = self.get_robot_heading()
 
-        # Decide what our current immediate goal is (the next waypoint, or the final target)
         if len(self.path) > 0:
             current_target = self.path[0]
             current_tolerance = self.waypoint_tolerance
@@ -342,24 +344,19 @@ class GoToTargetSkill(BaseSkill):
         dy = current_target[1] - robot_pos[1]
         distance = math.sqrt(dx**2 + dy**2)
 
-        # =====================================
-        # TARGET / WAYPOINT REACHED
-        # =====================================
         if distance < current_tolerance:
             if len(self.path) > 0:
-                # We hit a waypoint! Pop it from the list and continue.
                 self.path.pop(0)
                 self.set_wheel_speeds(0.0, 0.0)
                 return
             else:
-                # We hit the final target!
                 self.arrived = True
                 self.set_wheel_speeds(0.0, 0.0)
                 if self.sio:
                     self.sio.emit(
                         "agent_log",
                         {
-                            "agent": "GoToTargetSkill",
+                            "agent": self.agent_id,
                             "message": "Destination reached successfully.",
                         },
                     )
@@ -391,17 +388,11 @@ class GoToTargetSkill(BaseSkill):
     # ==================================================
 
     def get_robot_position(self):
-
-        node = self.supervisor.getSelf()
-
-        pos = node.getPosition()
-
+        pos = self.supervisor.getSelf().getPosition()
         return (pos[0], pos[1])
 
     def get_target_position(self):
-
         pos = self.target_node.getPosition()
-
         return (pos[0], pos[1])
 
     def get_robot_heading(self):
@@ -415,20 +406,17 @@ class GoToTargetSkill(BaseSkill):
         return heading
 
     def normalize_angle(self, angle):
-
         while angle > math.pi:
             angle -= 2 * math.pi
-
         while angle < -math.pi:
             angle += 2 * math.pi
-
         return angle
 
 
 class PatrolSkill(BaseSkill):
-
     def __init__(
         self,
+        agent_id,
         supervisor,
         sio,
         left_motor,
@@ -436,31 +424,20 @@ class PatrolSkill(BaseSkill):
         waypoint_nodes,
         goto_skill_class,
     ):
-        super().__init__(supervisor, sio, left_motor, right_motor)
-
+        super().__init__(agent_id, supervisor, sio, left_motor, right_motor)
         self.waypoint_nodes = waypoint_nodes
-
         self.goto_skill_class = goto_skill_class
-
         self.current_waypoint_index = 0
-
         self.active_navigation_skill = None
 
     def start(self):
-
         super().start()
-
         if not self.waypoint_nodes:
-
             if self.sio:
                 self.sio.emit(
                     "agent_log",
-                    {
-                        "agent": "PatrolSkill",
-                        "message": "No patrol waypoints available.",
-                    },
+                    {"agent": self.agent_id, "message": "Patrol failed: No waypoints."},
                 )
-
             return
 
         if self.sio:
@@ -475,7 +452,6 @@ class PatrolSkill(BaseSkill):
         self.activate_current_waypoint()
 
     def update(self):
-
         if not self.active_navigation_skill:
             return
 
@@ -485,18 +461,15 @@ class PatrolSkill(BaseSkill):
         # WAYPOINT REACHED
         # =====================================
         if self.active_navigation_skill.is_complete():
-
             self.current_waypoint_index += 1
 
-            # Loop patrol forever
             if self.current_waypoint_index >= len(self.waypoint_nodes):
                 self.current_waypoint_index = 0
-
                 if self.sio:
                     self.sio.emit(
                         "agent_log",
                         {
-                            "agent": "PatrolSkill",
+                            "agent": self.agent_id,
                             "message": "Patrol loop completed. Restarting route.",
                         },
                     )
@@ -504,24 +477,65 @@ class PatrolSkill(BaseSkill):
             self.activate_current_waypoint()
 
     def activate_current_waypoint(self):
-
         target_node = self.waypoint_nodes[self.current_waypoint_index]
 
         if self.sio:
             self.sio.emit(
                 "agent_log",
                 {
-                    "agent": "PatrolSkill",
+                    "agent": self.agent_id,
                     "message": f"Navigating to waypoint {self.current_waypoint_index + 1}",
                 },
             )
 
         self.active_navigation_skill = self.goto_skill_class(
+            agent_id=self.agent_id,
             supervisor=self.supervisor,
             sio=self.sio,
             left_motor=self.left_motor,
             right_motor=self.right_motor,
             target_node=target_node,
         )
-
         self.active_navigation_skill.start()
+
+
+class AerialScanSkill(BaseSkill):
+    def __init__(self, agent_id, supervisor, sio, left_motor=None, right_motor=None):
+        super().__init__(agent_id, supervisor, sio, left_motor, right_motor)
+        self.drone_node = self.supervisor.getFromDef(agent_id.upper())
+        self.translation_field = self.drone_node.getField("translation")
+        self.target_altitude = 3.0
+        self.ascent_speed = 0.015
+        self._is_complete = False
+
+    def start(self):
+        super().start()
+        if self.sio:
+            self.sio.emit(
+                "agent_log",
+                {"agent": self.agent_id, "message": "Initiating aerial ascent."},
+            )
+
+    def update(self):
+        position = self.translation_field.getSFVec3f()
+        x = position[0]
+        y = position[1]
+        z = position[2]
+
+        # CHANGED: Webots ENU coordinates map altitude to the Z axis!
+        if z < self.target_altitude:
+            z += self.ascent_speed
+            self.translation_field.setSFVec3f([x, y, z])
+        else:
+            self._is_complete = True
+            if self.sio:
+                self.sio.emit(
+                    "agent_log",
+                    {
+                        "agent": self.agent_id,
+                        "message": "Aerial scan altitude reached.",
+                    },
+                )
+
+    def is_complete(self):
+        return self._is_complete
