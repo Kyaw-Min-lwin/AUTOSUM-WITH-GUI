@@ -10,6 +10,7 @@ from skills import AvoidObstacleSkill
 from blackboard import Blackboard
 from perception_agent import PerceptionAgent
 from pathfinder import AStarPathfinder
+import json
 
 supervisor = Supervisor()
 TIME_STEP = int(supervisor.getBasicTimeStep())
@@ -35,6 +36,9 @@ def connect():
     sio.emit("agent_log", {"agent": agent_id, "message": "Hardware online."})
 
 
+# read user goal
+with open("mission_config.json", "r") as f:
+    mission_data = json.load(f)
 # 1. Initialize hardware
 left_motor = None
 right_motor = None
@@ -102,7 +106,7 @@ def is_path_blocked(sensors):
 
 
 # Setup global user goal
-blackboard.set_user_goal("All the robots will follow one epuck")
+blackboard.set_user_goal(mission_data["goal"])
 if agent_type == "drone":
     # The drone skips planning and immediately runs its auto-deployed AerialScanSkill
     blackboard.set_mission_status("executing")

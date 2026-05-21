@@ -6,6 +6,7 @@ import os
 from world_builder import generate_wbt
 import time
 import requests
+import json
 
 # Mute the default Flask logging so our console stays clean
 log = logging.getLogger("werkzeug")
@@ -17,11 +18,10 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Keep track of the webots process so we can kill it later
 webots_process = None
-
-import shutil
-
-print(shutil.which("webots"))
-print("  testing *************8")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+config_dir = os.path.join(BASE_DIR, "controllers", "autosim_supervisor")
+os.makedirs(config_dir, exist_ok=True)
+config_path = os.path.join(config_dir, "mission_config.json")
 
 
 @app.route("/")
@@ -29,12 +29,12 @@ def index():
     return "AutoSim Flask Backend is running."
 
 
-def wait_for_webots(url, timeout=10):
+def wait_for_webots_stream(timeout=20):
     start = time.time()
     while time.time() - start < timeout:
         try:
-            r = requests.get(url)
-            if r.status_code == 200:
+            response = requests.get("http://127.0.0.1:1234/index.html")
+            if response.status_code == 200:
                 return True
         except:
             pass
@@ -44,9 +44,10 @@ def wait_for_webots(url, timeout=10):
 
 def simulated_agent_workflow(goal, map_data):
     print(map_data)
-    """
-    Executes the multi-agent orchestration and launches Webots.
-    """
+    mission_payload = {"goal": goal, "map": map_data}
+    with open(config_path, "w") as f:
+        json.dump(mission_payload, f, indent=4)
+
     global webots_process
     socketio.sleep(0.5)
     socketio.emit(
@@ -102,7 +103,16 @@ def simulated_agent_workflow(goal, map_data):
         )
         print(webots_process.stdout.readline())
 
-        socketio.sleep(5.5)  # Give Webots a second to spin up the web server
+        if not wait_for_webots_stream():
+            socketio.emit(
+                "agent_log",
+                {
+                    "agent": "System",
+                    "message": "ERROR: Webots stream failed to initialize.",
+                },
+            )
+
+            return
 
         socketio.emit(
             "agent_log",
@@ -114,19 +124,8 @@ def simulated_agent_workflow(goal, map_data):
         print("sim ready")
         socketio.emit(
             "simulation_ready",
-            {"url": "http://127.0.0.1:1234/index.html?url=ws://127.0.0.1:1234"},
+            {"ready": True},
         )
-        # url = "http://127.0.0.1:1234/index.html?url=ws://127.0.0.1:1234"
-        # if wait_for_webots(url):
-        #     socketio.emit(
-        #         "simulation_ready",
-        #         {"url": "http://127.0.0.1:1234/index.html?url=ws://127.0.0.1:1234"},
-        #     )
-        # else:
-        #     socketio.emit(
-        #         "agent_log",
-        #         {"agent": "System", "message": "ERROR: Webots stream failed to start."},
-        #     )
 
     except FileNotFoundError:
         socketio.emit(

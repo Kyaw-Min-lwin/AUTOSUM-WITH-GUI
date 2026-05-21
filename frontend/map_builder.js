@@ -187,12 +187,9 @@ function handleInteraction(event) {
             }
 
             else if (currentTool === 'drone') {
-
                 // Highlander Rule
                 if (currentDrone) {
-
                     scene.remove(currentDrone);
-
                     mapObjects = mapObjects.filter(
                         obj => obj !== currentDrone
                     );
@@ -204,7 +201,6 @@ function handleInteraction(event) {
                 );
 
                 mesh.position.set(x, 2.0, z);
-
                 mesh.userData = {
                     type: 'drone',
                     id: 'drone_1'
@@ -357,29 +353,21 @@ socket.on("connect", () => {
 });
 
 if (typeof socket !== 'undefined') {
-    socket.on('simulation_ready', (data) => {
-        console.log("SIMULATION READY RECEIVED", data);
+    socket.on('simulation_ready', () => {
+        console.log("SIMULATION READY RECEIVED");
         const threeCanvas = document.getElementById('canvas-container');
         const webotsIframe = document.getElementById('webots-stream');
 
-        webotsIframe.src = data.url;
-        console.log(data.url, 'test');
+        // reset iframe first
+        webotsIframe.style.display = 'none';
+        webotsIframe.src = "";
 
-
-        threeCanvas.style.display = 'none';
-        webotsIframe.style.display = 'block';
-        webotsIframe.classList.remove('hidden');
-
-
-        // threeCanvas.classList.add('hidden');
-
-        // webotsIframe.classList.remove('z-0');
-        // webotsIframe.classList.add('z-20');
         setTimeout(() => {
-            if (!webotsIframe.contentWindow) {
-                console.error('Webots stream failed to load');
-                console.log(data.url);
-            }
-        }, 5000);
+            webotsIframe.src = "./webots_embed.html";
+            threeCanvas.style.display = 'none';
+            webotsIframe.style.display = 'block';
+            webotsIframe.classList.remove('hidden');
+
+        }, 250);
     });
 }

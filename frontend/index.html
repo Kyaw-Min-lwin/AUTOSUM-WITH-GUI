@@ -273,6 +273,24 @@
             consolePanel.scrollTop = consolePanel.scrollHeight; // Auto-scroll to bottom
         });
 
+                        // socket.on('simulation_ready', () => {
+                        //     console.log("SIMULATION READY RECEIVED");
+                        //     const threeCanvas = document.getElementById('canvas-container');
+                        //     const webotsIframe = document.getElementById('webots-stream');
+
+                        //     // reset iframe first
+                        //     webotsIframe.style.display = 'none';
+                        //     webotsIframe.src = "";
+
+                        //     setTimeout(() => {
+                        //         webotsIframe.src = "./webots_embed.html";
+                        //         threeCanvas.style.display = 'none';
+                        //         webotsIframe.style.display = 'block';
+                        //         webotsIframe.classList.remove('hidden');
+
+                        //     }, 250);
+                        // });
+
             // Trigger the sequence
             document.getElementById('start-btn').addEventListener('click', () => {
                 const goal = document.getElementById('goal-input').value.trim();

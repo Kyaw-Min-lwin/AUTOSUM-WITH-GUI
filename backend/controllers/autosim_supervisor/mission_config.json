@@ -1,0 +1,53 @@
+{
+    "goal": "Navigate to the target and secure the perimeter.",
+    "map": {
+        "walls": [
+            {
+                "x": -4,
+                "z": 1
+            },
+            {
+                "x": -3,
+                "z": 1
+            },
+            {
+                "x": -2,
+                "z": 1
+            },
+            {
+                "x": -1,
+                "z": 1
+            },
+            {
+                "x": 0,
+                "z": 1
+            },
+            {
+                "x": 1,
+                "z": 1
+            },
+            {
+                "x": 2,
+                "z": 1
+            }
+        ],
+        "targets": [
+            {
+                "x": -1,
+                "z": 4
+            }
+        ],
+        "epucks": [
+            {
+                "id": "epuck_1",
+                "x": -1,
+                "z": -6
+            }
+        ],
+        "drone": {
+            "id": "drone_1",
+            "x": -9,
+            "z": 8
+        }
+    }
+}
