@@ -1,44 +1,46 @@
 import sys
-import os
 import socketio
 from controller import Supervisor
-
-# Import your custom classes
 from world_state import WorldState
 from executor import PlanExecutor
-from skills import AvoidObstacleSkill
-from blackboard import Blackboard
-from perception_agent import PerceptionAgent
-from pathfinder import AStarPathfinder
 
-# Import LangGraph components
-from langchain_groq import ChatGroq
-# (The file where you put the LangGraph code)
-from robot_agent import build_robot_graph
-
-# ==========================================
-# 1. WEBOTS SUPERVISOR & SOCKET.IO INIT
-# ==========================================
 supervisor = Supervisor()
 TIME_STEP = int(supervisor.getBasicTimeStep())
 sio = socketio.Client()
 
 # ==========================================
-# 2. AGENT IDENTITY (Source of agent_id, agent_type)
+# MULTI-AGENT IDENTITY ASSIGNMENT
 # ==========================================
 agent_id = sys.argv[1] if len(sys.argv) > 1 else "epuck_1"
 agent_type = "drone" if "drone" in agent_id.lower() else "ground"
 
 try:
-    print(f"[{agent_id.upper()}] Connecting to Command Center...")
+    print(f"[{agent_id.upper()}] Attempting to connect to Flask Command Center...")
     sio.connect("http://localhost:5000")
-    sio.emit("agent_log", {"agent": agent_id, "message": "Hardware online."})
-except Exception:
-    pass
+except Exception as e:
+    sys.exit(1)
+
+
+@sio.event
+def connect():
+    sio.emit(
+        "agent_log",
+        {"agent": agent_id, "message": "Hardware online. Awaiting commands."},
+    )
+
 
 # ==========================================
-# 3. HARDWARE INIT (Source of motors, proximity_sensors)
+# LISTEN FOR COMMANDS FROM FLASK
 # ==========================================
+@sio.on("execute_plan")
+def on_execute_plan(data):
+    """Listens for the LangGraph orchestrator sending a validated JSON skill plan."""
+    if data.get("agent_id") == agent_id:
+        print(f"[{agent_id.upper()}] Received new tactical plan from Swarm Command.")
+        executor.load_plan(data)
+
+
+# 1. Initialize hardware
 left_motor = None
 right_motor = None
 proximity_sensors = []
@@ -65,71 +67,47 @@ hardware_map = {
     "proximity_sensors": proximity_sensors,
 }
 
-# ==========================================
-# 4. CLASS INSTANTIATIONS (Source of blackboard, executor, etc.)
-# ==========================================
-blackboard = Blackboard(supervisor)
-blackboard.register_agent(agent_id, agent_type=agent_type)
+print(f"[{agent_id.upper()}] Booting execution engine...")
 
-world_tracker = WorldState(supervisor, proximity_sensors)
+# 2. Initialize Core Systems (NO LLMS, NO BLACKBOARD!)
+world = WorldState(supervisor, proximity_sensors)
 executor = PlanExecutor(agent_id, supervisor, sio, hardware_map)
 
-avoid_skill = None
-if left_motor and right_motor:
-    avoid_skill = AvoidObstacleSkill(
-        agent_id, supervisor, sio, left_motor, right_motor, proximity_sensors
-    )
-
-global_pathfinder = AStarPathfinder(cell_size=0.1, obstacle_padding=0.25)
-perception = PerceptionAgent(blackboard, sio)
-
-# Setup global user goal
-blackboard.set_user_goal("All the robots will follow one epuck")
-if agent_type == "drone":
-    blackboard.set_mission_status("executing")
-else:
-    blackboard.set_mission_status("needs_objectives")
-
-# ==========================================
-# 5. LANGGRAPH INIT (Source of llm, agent_graph)
-# ==========================================
-print(f"[{agent_id.upper()}] Booting LangGraph Engine...")
-llm = ChatGroq(
-    model="llama3-70b-8192",
-    temperature=0.0,
-    api_key=os.getenv("GROQ_API_KEY")
-)
-
-agent_graph = build_robot_graph()
-
-# ==========================================
-# 6. THE MAIN LOOP
-# ==========================================
 tick = 0
+
+# ==========================================
+# THE DUMB CLIENT LOOP
+# ==========================================
 while supervisor.step(TIME_STEP) != -1:
-    tick += 1
-    blackboard.increment_tick()
+    # 1. READ SENSORS
+    world.update_objects()
+    world.update_runtime()
 
-    # Package all the variables we initialized above into the StateDict!
-    current_state = {
-        "agent_id": agent_id,
-        "agent_type": agent_type,
-        "blackboard": blackboard,
-        "executor": executor,
-        "avoid_skill": avoid_skill,
-        "proximity_sensors": proximity_sensors,
-        "pathfinder": global_pathfinder,
-        "llm": llm,
-        "world_tracker": world_tracker,
-        "perception": perception,
-        "supervisor": supervisor,
-        "evading": False  # Always starts False at the beginning of a tick
-    }
+    robot_node = supervisor.getSelf()
+    position = robot_node.getPosition()
+    orientation = robot_node.getOrientation()
 
-    # Pass the state into the graph. The graph will mutate the state
-    # (e.g., update the blackboard, change 'evading' to True, etc.)
-    agent_graph.invoke(current_state)
-
-    # Telemetry
+    # 2. STREAM TELEMETRY TO FLASK
     if tick % 15 == 0:
-        sio.emit("world_state_stream", blackboard.to_json())
+        telemetry_payload = {
+            "agent_id": agent_id,
+            "type": agent_type,
+            "position": position,
+            "heading": orientation,
+            "world_state": world.get_state(),
+        }
+        sio.emit("telemetry_update", telemetry_payload)
+
+    # 3. EXECUTE MOTORS
+    status = executor.update()
+
+    # 4. REPORT SKILL COMPLETION
+    # If a skill finishes or fails, tell the Flask server so LangGraph can calculate the next move
+    if status in ["DONE", "FAILED"]:
+        print(f"[{agent_id.upper()}] Skill {status}. Alerting Swarm Command.")
+        sio.emit("skill_status", {"agent_id": agent_id, "status": status})
+
+        # Reset executor status to IDLE so we don't spam the server
+        executor.status = "IDLE"
+
+    tick += 1

@@ -155,6 +155,26 @@ def relay_agent_log(data):
     # Rebroadcast to all connected frontend clients
     socketio.emit("agent_log", data)
 
+swarm_telemetry = {}
+
+
+@socketio.on("telemetry_update")
+def handle_telemetry(data):
+    """Catches 32ms telemetry streams from Webots dumb-clients."""
+    agent_id = data.get("agent_id")
+    if agent_id:
+        swarm_telemetry[agent_id] = data
+        # Instantly forward the combined telemetry to the Electron Frontend UI
+        socketio.emit("world_state_stream", swarm_telemetry)
+
+
+@socketio.on("skill_status")
+def handle_skill_status(data):
+    """Catches DONE/FAILED alerts when a robot finishes a physical task."""
+    agent_id = data.get("agent_id")
+    status = data.get("status")
+    print(f"[Flask Brain] Alert: {agent_id} reported skill execution is {status}.")
+
 
 if __name__ == "__main__":
     print("=" * 50)
