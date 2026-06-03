@@ -2,6 +2,7 @@ import os
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
+from state import SwarmState
 from tools import check_path_feasibility, calculate_spatial_relationship, dispatch_physical_action
 import json 
 
@@ -16,43 +17,37 @@ llm = ChatGroq(
 # 2. Bind the physical tools to the LLM
 navigator_tools = [check_path_feasibility, calculate_spatial_relationship, dispatch_physical_action]
 navigator_llm = llm.bind_tools(navigator_tools)
+strategist_llm = llm.bind(response_format={"type": "json_object"})
 
-def navigator_node(state: dict):
-    """
-    The Tactical Reasoning Agent. 
-    It evaluates the environment, calls tools to check physics, and dispatches actions.
-    """
-    agent_id = state.get("current_agent_id", "epuck_1") # Provided by the Orchestrator
-    objective = state["mission"]["current_objectives"].get(agent_id, "Wait for orders.")
-    
-    # 1. Extract local environment data to prevent token bloat
-    semantic_data = state.get("semantic_state", {})
-    targets = [t["id"] for t in semantic_data.get("discovered_targets", [])]
-    
-    # 2. The Agentic Prompt
+
+def navigator_node(state: SwarmState):
+    """The Tactical Reasoning Agent."""
+
+    agent_id = state.get("current_agent_id", "epuck_1")
+
+    # state.py nests objectives inside the mission dictionary
+    objective_list = state.get("mission", {}).get("objectives", {}).get(agent_id, [])
+    objective = objective_list[0] if objective_list else "Wait for orders."
+
+    targets = [
+        t.object_id for t in state.get("semantic", {}).get("discovered_targets", [])
+    ]
+
     system_prompt = f"""
     You are the Tactical Navigator for {agent_id}.
-    Your current objective is: "{objective}"
-    
-    ENVIRONMENT:
+    Objective: "{objective}"
     Known Targets: {targets}
     
-    INSTRUCTIONS:
-    1. If you need to move to a target, ALWAYS use 'check_path_feasibility' first.
-    2. If the path is blocked, do not dispatch GoToTarget. Dispatch 'WanderSkill' or 'SpinScanSkill' to find a new route.
-    3. Once you are certain of your action, call 'dispatch_physical_action'.
+    1. Use 'check_path_feasibility' to verify paths.
+    2. Once certain, call 'dispatch_physical_action'.
+    3. You MUST provide your own name ('{agent_id}') as the agent_id parameter in the tool!
     """
-    
-    # 3. Invoke the LLM with the prompt and its previous thoughts/tool results
+
     messages = [SystemMessage(content=system_prompt)] + state.get("messages", [])
     response = navigator_llm.invoke(messages)
-    
-    # 4. Return the LLM's output to be appended to the state
+
     return {"messages": [response]}
 
-
-# force it to strictly return JSON
-strategist_llm = llm.bind(response_format={"type": "json_object"})
 
 def strategist_node(state: dict):
     """
@@ -60,18 +55,25 @@ def strategist_node(state: dict):
     Reads the global map, divides labor, and assigns objectives to individual robots.
     """
     mission = state.get("mission", {})
-    semantic = state.get("semantic_state", {})
+    semantic = state.get("semantic", {})
     robots = state.get("robots", {})
-    
+
     # 1. GATEKEEPER: Don't plan if recon isn't done or if we already planned!
     if not semantic.get("recon_complete", False):
         return {"messages": ["Strategist: Awaiting aerial intelligence..."]}
-        
+
     if mission.get("dispatched", False):
         return {} # We already built the plan, do nothing!
 
     # 2. Gather data
     ground_swarm = [rid for rid, data in robots.items() if data.get("type") == "ground"]
+
+    # Check if we already dispatched for ALL ground units
+    all_dispatched = all(
+        mission.get("dispatched", {}).get(rid, False) for rid in ground_swarm
+    )
+    if all_dispatched and ground_swarm:
+        return {}
     targets = [t["id"] for t in semantic.get("discovered_targets", [])]
     user_goal = mission.get("user_goal", "Explore the area")
 
@@ -97,7 +99,7 @@ def strategist_node(state: dict):
 
     # 5. Invoke the LLM
     response = strategist_llm.invoke([SystemMessage(content=system_prompt)])
-    
+
     # 6. Parse and apply to the State
     try:
         task_distribution = json.loads(response.content)
@@ -106,12 +108,11 @@ def strategist_node(state: dict):
         print(f"[Strategist] JSON Parse Error: {e}")
         task_distribution = {rid: ["Explore the environment"] for rid in ground_swarm}
 
-    # 7. Return the Patch! 
+    dispatch_flags = {rid: True for rid in ground_swarm}
+
+    # 7. Return the Patch!
     # This updates the global state, injecting the task lists into the memory.
     return {
-        "mission": {
-            "objectives": task_distribution,
-            "dispatched": True # Lock it so we don't plan again
-        },
-        "messages": [f"Strategist deployed tactical plan: {task_distribution}"]
+        "mission": {"objectives": task_distribution, "dispatched": dispatch_flags},
+        "messages": [f"Strategist deployed tactical plan: {task_distribution}"],
     }
