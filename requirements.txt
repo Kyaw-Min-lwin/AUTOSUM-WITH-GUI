@@ -1,0 +1,44 @@
+# ============================================================================
+# AutoSim — Sovereign Robotics Framework :: Python dependencies
+# ----------------------------------------------------------------------------
+# Install into a fresh virtual environment:
+#
+#     python -m venv venv
+#     # Windows:        venv\Scripts\activate
+#     # macOS / Linux:  source venv/bin/activate
+#     pip install -r requirements.txt
+#
+# Version constraints are conservative lower bounds; bump as needed.
+# ============================================================================
+
+# ---- Web / command backend (backend/app.py) -------------------------------
+flask>=3.0.0
+flask-socketio>=5.3.0
+python-socketio>=5.11.0          # also used by the Webots controllers to call home
+requests>=2.31.0
+
+# ---- Config --------------------------------------------------------------
+python-dotenv>=1.0.0
+
+# ---- Agentic / LLM stack -------------------------------------------------
+langgraph>=0.2.0                 # central "swarm cognitive engine" (backend/graph/)
+langchain-core>=0.3.0
+langchain-groq>=0.2.0
+groq>=0.11.0                     # ultra-low-latency inference (openai/gpt-oss-120b)
+google-generativeai>=0.7.0       # optional: Gemini client in llm_client.py
+
+# ---- Typed state models (backend/graph/state.py) -------------------------
+pydantic>=2.7.0
+typing-extensions>=4.11.0
+
+# ============================================================================
+# NOTE — Webots controllers
+# ----------------------------------------------------------------------------
+# The robot controllers (backend/controllers/...) run under Webots' OWN Python
+# interpreter, not this venv. They import the `controller` module, which ships
+# with Webots and is NOT installable via pip.
+#
+# Make sure the Python interpreter Webots uses also has these installed:
+#     python-socketio, groq, python-dotenv
+# (and google-generativeai only if you enable the Gemini client there).
+# ============================================================================
