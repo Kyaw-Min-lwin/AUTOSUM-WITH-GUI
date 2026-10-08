@@ -3,7 +3,7 @@ import os
 BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
-def generate_wbt(map_data: dict, filepath: str = "worlds/temp_run.wbt"):
+def generate_wbt(map_data: dict, filepath: str = "worlds/temp_run.wbt", mission_id: str = ""):
     """
     Translates JSON map coordinates into a valid Webots .wbt file.
     """
@@ -85,8 +85,8 @@ def generate_wbt(map_data: dict, filepath: str = "worlds/temp_run.wbt"):
         DEF {epuck_id.upper()} E-puck {{
             translation {ex} {ey} 0.01
             rotation 0 0 1 0
-            controller "autosim_supervisor"
-            controllerArgs [ "{epuck_id}" ]
+            controller "autosim_agent"
+            controllerArgs [ "{epuck_id}" "{mission_id}" ]
             name "{epuck_id}"
             supervisor TRUE
         }}""")
@@ -105,8 +105,8 @@ def generate_wbt(map_data: dict, filepath: str = "worlds/temp_run.wbt"):
         DEF {drone_id.upper()} Crazyflie {{
             translation {dx} {dy} 0.2
             rotation 0 0 1 0
-            controller "autosim_supervisor"
-            controllerArgs [ "{drone_id}" ]
+            controller "autosim_agent"
+            controllerArgs [ "{drone_id}" "{mission_id}" ]
             name "{drone_id}"
             supervisor TRUE
         }}""")
