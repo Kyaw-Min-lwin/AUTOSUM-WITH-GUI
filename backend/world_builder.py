@@ -19,7 +19,6 @@ def generate_wbt(map_data: dict, filepath: str = "worlds/temp_run.wbt", mission_
         'EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/robots/gctronic/e-puck/protos/E-puck.proto"',
         'EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/robots/bitcraze/crazyflie/protos/Crazyflie.proto"',
         # Explicitly define the ENU coordinate system (X, Y = floor, Z = up)
-        'Project { controllerDir "../controllers" }',
         'WorldInfo { basicTimeStep 32 coordinateSystem "ENU" }',
         "Viewpoint { position 0 -3 1.5 orientation 0 0 1 1.57 }",
         "TexturedBackground {}",

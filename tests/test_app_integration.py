@@ -31,7 +31,7 @@ class AppIntegrationTests(unittest.TestCase):
     def submit(self, goal="Visit all targets"):
         response = self.client.emit("submit_goal", {"goal": goal, "map": {
             "epucks": [{"id": "epuck_1"}, {"id": "epuck_2"}],
-            "targets": [{"x": 4}, {"x": -4}], "drone": {"id": "drone_1"},
+            "targets": [{"x": 4}, {"x": -4}, {"x": 4, "z": 4}], "drone": {"id": "drone_1"},
         }}, callback=True)
         self.assertTrue(response["ok"])
         return response["mission_id"]
@@ -61,7 +61,7 @@ class AppIntegrationTests(unittest.TestCase):
         next_plans = self.plans()
         self.assertEqual(len(next_plans), 1)
         self.assertNotEqual(next_plans[0]["plan_id"], first["plan_id"])
-        self.assertEqual(next_plans[0]["plan"][0]["parameters"]["target_id"], "TARGET_1")
+        self.assertEqual(next_plans[0]["plan"][0]["parameters"]["target_id"], "TARGET_2")
         for plan in [next_plans[0], next(p for p in plans if p["agent_id"] == "epuck_2")]:
             self.client.emit("skill_status", {**plan, "status": "DONE"})
         self.assertEqual(server.coordinator.state["mission"]["status"], "complete")

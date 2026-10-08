@@ -95,6 +95,12 @@ recon gating, real LangGraph tool loops, isolated robot conversations, Socket.IO
 goal/telemetry/plan/completion flow, and failure handling. It substitutes model
 responses and hardware where appropriate; no API key or Webots is required.
 
+An optional real-simulator check is available with
+`python tests/manual_webots_smoke.py`. It requires Webots on PATH (or
+`WEBOTS_EXECUTABLE`) and a free localhost:5000. It uses a temporary project
+and scripted model responses, and fails if the mission does not finish within
+50 seconds. It does not exercise the Electron window or a live cloud model.
+
 ## Current limits
 
 - Drone motion is scripted using supervisor position updates and physics resets.

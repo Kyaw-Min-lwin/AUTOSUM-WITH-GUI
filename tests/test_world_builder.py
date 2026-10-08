@@ -20,3 +20,4 @@ class WorldBuilderTests(unittest.TestCase):
         self.assertIn('controllerArgs [ "drone_1" "run-123" ]', world)
         self.assertTrue((BACKEND / "controllers/autosim_agent/autosim_agent.py").is_file())
         self.assertNotIn('controller "autosim_supervisor"', world)
+        self.assertNotIn("Project {", world)

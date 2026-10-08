@@ -33,7 +33,7 @@ class ScriptedModel:
                 self.strategist_calls += 1
                 self.goal = messages[1].content
             return AIMessage(content=json.dumps({
-                "epuck_1": ["Navigate to TARGET_0", "Navigate to TARGET_1"],
+                "epuck_1": ["Navigate to TARGET_0", "Navigate to TARGET_2"],
                 "epuck_2": ["Navigate to TARGET_1"],
             }))
         rid = re.search(r"navigator for (epuck_\d+)", prompt).group(1)
@@ -54,7 +54,7 @@ def ready_mission():
     coordinator = MissionCoordinator()
     _, run = coordinator.start("Visit all targets", {
         "epucks": [{"id": "epuck_1"}, {"id": "epuck_2"}],
-        "targets": [{"x": 4, "z": 0}, {"x": -4, "z": 0}],
+        "targets": [{"x": 4, "z": 0}, {"x": -4, "z": 0}, {"x": 4, "z": 4}],
     })
     for rid in ("epuck_1", "epuck_2"):
         coordinator.telemetry({"mission_id": run, "agent_id": rid, "position": [0, 0, 0]})
@@ -81,7 +81,7 @@ class SwarmGraphTests(unittest.TestCase):
         result2 = engine.invoke(coordinator.snapshot())
         self.assertEqual(model.strategist_calls, 1)
         self.assertEqual(set(result2["plans"]), {"epuck_1"})
-        self.assertEqual(result2["plans"]["epuck_1"][0]["parameters"]["target_id"], "TARGET_1")
+        self.assertEqual(result2["plans"]["epuck_1"][0]["parameters"]["target_id"], "TARGET_2")
 
     def test_invalid_action_never_reaches_robots_and_retry_loop_is_bounded(self):
         coordinator, run = ready_mission()
