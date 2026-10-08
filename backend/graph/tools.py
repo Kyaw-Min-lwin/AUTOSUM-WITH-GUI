@@ -1,81 +1,42 @@
-import math
-from langchain_core.tools import tool
-from pathfinder import AStarPathfinder
 import json
+import math
+from typing import Annotated
+
+from langchain_core.tools import tool
+from langgraph.prebuilt import InjectedState
+
+from .actions import reachable, validate_step
 
 
-# ==========================================
-# TOOL 1: PATHFINDING (Tactical Checking)
-# ==========================================
 @tool
-def check_path_feasibility(
-    start_x: float, start_y: float, target_x: float, target_y: float, obstacles: list
-) -> str:
-    """
-    Checks if a physical path exists from the robot's location to the target.
-    Always use this tool to verify a route is not blocked by walls before dispatching a GoToTarget action.
-    Returns the path feasibility and estimated distance.
-    """
-    # Instantiate your existing class under the hood
-    pathfinder = AStarPathfinder(cell_size=0.1, obstacle_padding=0.25)
-
-    start_pos = (start_x, start_y)
-    target_pos = (target_x, target_y)
-
-    # Run the math
-    path = pathfinder.find_path(start_pos, target_pos, obstacles)
-
-    if not path:
-        return "CRITICAL: Path is blocked. Target is physically unreachable. Replan required."
-
-    return f"Path is clear. Route requires {len(path)} steps."
+def check_path_feasibility(target_id: str, state: Annotated[dict, InjectedState]) -> str:
+    """Check a target's route using the robot position and walls from mission telemetry."""
+    path = reachable(state["swarm"], state["agent_id"], target_id)
+    return f"Path is clear: {len(path)} waypoints."
 
 
-# ==========================================
-# TOOL 2: SPATIAL AWARENESS (Perception Math)
-# ==========================================
 @tool
-def calculate_spatial_relationship(
-    robot_x: float, robot_y: float, target_x: float, target_y: float
-) -> str:
-    """
-    Calculates the physical distance and compass quadrant of an object relative to the robot.
-    Use this to understand which direction to look or travel.
-    """
-    dx = target_x - robot_x
-    dy = target_y - robot_y
-    distance = round(math.sqrt(dx**2 + dy**2), 2)
-
-    # Your quadrant logic
-    if dx >= 0 and dy >= 0:
-        quadrant = "North-East"
-    elif dx < 0 and dy >= 0:
-        quadrant = "North-West"
-    elif dx < 0 and dy < 0:
-        quadrant = "South-West"
-    else:
-        quadrant = "South-East"
-
-    return f"Target is {distance} meters away in the {quadrant} quadrant."
+def calculate_spatial_relationship(target_id: str, state: Annotated[dict, InjectedState]) -> str:
+    """Get distance and bearing to a known target from authoritative world coordinates."""
+    swarm = state["swarm"]
+    target = next((o for o in swarm["world_state"]["objects"] if o["id"] == target_id), None)
+    if target is None:
+        raise ValueError("Unknown target")
+    position = swarm["robots"][state["agent_id"]]["position"]
+    dx, dy = target["position"][0] - position[0], target["position"][1] - position[1]
+    return f"Distance {math.hypot(dx, dy):.3f}m; bearing {math.atan2(dy, dx):.3f} radians."
 
 
-# ==========================================
-# TOOL 3: ACTION DISPATCHER
-# ==========================================
 @tool
-def dispatch_physical_action(
-    skill_name: str, agent_id: str, target_id: str = None, leader_id: str = None
-) -> str:
+def dispatch_physical_action(skill_name: str, parameters: dict,
+                             state: Annotated[dict, InjectedState]) -> str:
+    """Commit ONE validated action for this objective.
+    Skills: GoToTargetSkill(target_id), FollowLeaderSkill(leader_id),
+    WanderSkill(duration_seconds), SpinScanSkill(duration_seconds),
+    PatrolSkill(waypoints: list of target IDs). Use parameters as a JSON object.
     """
-    Use this tool when you have made your final decision on what physical action to take.
-    Valid skill_names: 'GoToTargetSkill', 'WanderSkill', 'FollowLeaderSkill', 'AvoidObstacleSkill', 'SpinScanSkill'.
-    If GoToTargetSkill, provide target_id. If FollowLeaderSkill, provide leader_id.
-    """
+    step = validate_step(state["swarm"], state["agent_id"], skill_name, parameters)
+    return "ACTION_LOCKED: " + json.dumps({"agent_id": state["agent_id"], "plan": [step]})
 
-    payload = {"agent_id": agent_id, "plan": [{"skill": skill_name, "parameters": {}}]}
 
-    if target_id:
-        payload["plan"][0]["parameters"]["target_id"] = target_id
-    if leader_id:
-        payload["plan"][0]["parameters"]["leader_id"] = leader_id
-    return f"ACTION_LOCKED: {json.dumps(payload)}"
+navigator_tools = [check_path_feasibility, calculate_spatial_relationship, dispatch_physical_action]

@@ -1,83 +1,95 @@
+"""One strategist and an isolated ReAct subgraph for each ready robot."""
+import json
+from typing import Annotated
+from typing_extensions import TypedDict
+
+from langchain_core.messages import ToolMessage
 from langgraph.graph import StateGraph, START, END
+from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
-from langgraph.constants import Send
-from nodes import strategist_node, navigator_node, navigator_tools
-from state import SwarmState
+from langgraph.types import Send
 
-# ==========================================
-# 1. THE ROUTING FUNCTIONS
-# ==========================================
-def dispatch_swarm(state: dict):
-    """
-    The Map-Reduce Router.
-    Reads the objectives assigned by the Strategist and spawns a parallel 
-    Navigator graph for every single ground robot.
-    """
-    objectives = state.get("mission", {}).get("objectives", {})
-    
-    # If the Strategist failed or gave no objectives, end the graph tick.
-    if not objectives:
+from .nodes import strategist_node, navigator_node
+from .state import SwarmState
+from .tools import navigator_tools
+
+
+class NavigatorState(TypedDict, total=False):
+    swarm: dict
+    agent_id: str
+    messages: Annotated[list, add_messages]
+    attempts: int
+
+
+def locked_plan(state):
+    # Only the latest tool batch can commit a plan. Never replay conversation history.
+    actions = []
+    for message in reversed(state.get("messages", [])):
+        if not isinstance(message, ToolMessage):
+            break
+        if (message.name == "dispatch_physical_action"
+                and isinstance(message.content, str)
+                and message.content.startswith("ACTION_LOCKED: ")):
+            actions.append(json.loads(message.content.removeprefix("ACTION_LOCKED: ")))
+    if len(actions) != 1:
+        return None
+    payload = actions[0]
+    return payload["plan"] if payload["agent_id"] == state["agent_id"] else None
+
+
+def dispatch_swarm(state):
+    if not state["semantic"]["recon_complete"] or not all(r["ready"] for r in state["robots"].values()):
         return END
-        
-    # Spawn a parallel Navigator for each robot that received a task
-    # We use the Send API to pass a focused, local state to each worker
-    parallel_workers = []
-    for agent_id in objectives.keys():
-        worker_state = {
-            # We pass the global state but inject the specific agent_id
-            **state, 
-            "current_agent_id": agent_id
-        }
-        parallel_workers.append(Send("navigator", worker_state))
-        
-    return parallel_workers
+    workers = [
+        Send("navigate_robot", {"swarm": state, "agent_id": rid, "messages": [], "attempts": 0})
+        for rid, objectives in state["mission"]["objectives"].items()
+        if objectives and state["robots"][rid]["type"] == "ground"
+        and state["execution"][rid]["status"] == "IDLE"
+    ]
+    return workers or END
 
-def check_navigator_finished(state: dict):
-    """
-    The ReAct Loop Router.
-    Checks if the Navigator called a Tool (like A* pathfinding) or 
-    dispatched a final physical action.
-    """
-    last_message = state["messages"][-1]
-    
-    # If the LLM decided to call a physical tool (e.g., check_path_feasibility)
-    if getattr(last_message, "tool_calls", None):
-        return "tools"
-        
-    # If the LLM outputted a final action string (e.g., "ACTION_LOCKED: {...}")
-    return END
 
-# ==========================================
-# 2. BUILD THE GRAPH
-# ==========================================
-builder = StateGraph(SwarmState)
+def build_engine(llm=None):
+    worker = StateGraph(NavigatorState)
+    worker.add_node("navigator", lambda state: navigator_node(state, llm))
+    worker.add_node("tools", ToolNode(navigator_tools, handle_tool_errors=True))
+    worker.add_edge(START, "navigator")
 
-# Add the AI Brains (Nodes)
-builder.add_node("strategist", strategist_node)
-builder.add_node("navigator", navigator_node)
+    def after_navigator(state):
+        calls = getattr(state["messages"][-1], "tool_calls", [])
+        # A final dispatch must be alone: don't execute multiple competing plans.
+        dispatches = [call for call in calls if call["name"] == "dispatch_physical_action"]
+        if dispatches and len(calls) != 1:
+            return END
+        return "tools" if calls else END
 
-# Add the Tool Belt (Using LangGraph's prebuilt ToolNode to automatically execute our Python functions)
-builder.add_node("tools", ToolNode(navigator_tools))
+    def after_tools(state):
+        if locked_plan(state) is not None or state["attempts"] >= 4:
+            return END
+        return "navigator"
 
-# ==========================================
-# 3. WIRE THE EDGES (The Agentic Flow)
-# ==========================================
-# Step 1: Always start by asking the Strategist to evaluate the global map
-builder.add_edge(START, "strategist")
+    worker.add_conditional_edges("navigator", after_navigator, ["tools", END])
+    worker.add_conditional_edges("tools", after_tools, ["navigator", END])
+    navigation = worker.compile()
 
-# Step 2: Strategist finishes -> Spawn parallel Navigators for epuck_1, epuck_2, etc.
-builder.add_conditional_edges("strategist", dispatch_swarm, ["navigator", END])
+    def navigate_robot(state):
+        rid = state["agent_id"]
+        try:
+            result = navigation.invoke(state)
+            plan = locked_plan(result)
+            if plan is None:
+                raise ValueError("Navigator did not commit one valid physical action")
+            return {"plans": {rid: plan}}
+        except Exception as exc:
+            return {"planning_errors": {rid: str(exc)}}
 
-# Step 3: Navigator finishes thinking -> Did it call a tool, or is it done?
-builder.add_conditional_edges("navigator", check_navigator_finished, ["tools", END])
+    graph = StateGraph(SwarmState)
+    graph.add_node("strategist", lambda state: strategist_node(state, llm))
+    graph.add_node("navigate_robot", navigate_robot)
+    graph.add_edge(START, "strategist")
+    graph.add_conditional_edges("strategist", dispatch_swarm, ["navigate_robot", END])
+    graph.add_edge("navigate_robot", END)
+    return graph.compile()
 
-# Step 4: Tool finishes running the math -> Route back to the Navigator to evaluate the result
-builder.add_edge("tools", "navigator")
 
-# ==========================================
-# 4. COMPILE THE ENGINE
-# ==========================================
-# We compile the graph. You can later add memory savers here for time-travel debugging!
-swarm_engine = builder.compile()
-
-print("[LangGraph] Sovereign Swarm Cognitive Engine Compiled Successfully.")
+swarm_engine = build_engine()

@@ -41,7 +41,8 @@ class PlanExecutor:
 
     def load_plan(self, plan_dict):
         """Loads a validated JSON plan from the Planner."""
-        self.plan_queue = plan_dict.get("plan", [])
+        self.abort()
+        self.plan_queue = list(plan_dict.get("plan", []))
         self.current_skill = None
         self.status = "RUNNING" if self.plan_queue else "IDLE"
 
@@ -63,9 +64,10 @@ class PlanExecutor:
         if self.current_skill is None:
             if not self.plan_queue:
                 self.status = "DONE"
-                self._emit_skill_status("DONE")
                 return self.status
             self._instantiate_next_skill()
+            if self.current_skill is None:
+                return self.status
 
         # 2. Check if current skill finished
         if self.current_skill.is_complete():
@@ -75,7 +77,6 @@ class PlanExecutor:
                 )
                 self.abort()  # Clear the rest of the plan
                 self.status = "FAILED"
-                self._emit_skill_status("FAILED")
                 return self.status
 
             self.current_skill.stop()
@@ -93,16 +94,6 @@ class PlanExecutor:
         self.current_skill = None
         self.plan_queue = []
         self.status = "IDLE"
-
-    def _emit_skill_status(self, status):
-        if self.sio:
-            self.sio.emit(
-                "skill_status",
-                {
-                    "agent": self.agent_id,
-                    "status": status,
-                },
-            )
 
     def _instantiate_next_skill(self):
         """The Factory: Converts JSON steps to Python objects."""
@@ -159,7 +150,6 @@ class PlanExecutor:
                 )
                 self.abort()
                 self.status = "FAILED"
-                self._emit_skill_status("FAILED")
                 return
 
             self.current_skill = GoToTargetSkill(
@@ -182,7 +172,6 @@ class PlanExecutor:
                 )
                 self.abort()
                 self.status = "FAILED"
-                self._emit_skill_status("FAILED")
                 return
 
             self.current_skill = PatrolSkill(
@@ -212,7 +201,6 @@ class PlanExecutor:
                 )
                 self.abort()
                 self.status = "FAILED"
-                self._emit_skill_status("FAILED")
                 return
 
             self.current_skill = FollowLeaderSkill(
@@ -223,5 +211,10 @@ class PlanExecutor:
                 right_motor=self.hardware_map["right_motor"],
                 leader_id=leader_id,
             )
+
+        else:
+            self.abort()
+            self.status = "FAILED"
+            return
 
         self.current_skill.start()
