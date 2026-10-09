@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from .pathfinder import AStarPathfinder
 
 # Match GoToTargetSkill's current geometry settings.
-PATH_PADDING = 0.04
+PATH_PADDING = 0.08
 SKILLS = {"GoToTargetSkill", "WanderSkill", "SpinScanSkill", "FollowLeaderSkill", "PatrolSkill"}
 
 

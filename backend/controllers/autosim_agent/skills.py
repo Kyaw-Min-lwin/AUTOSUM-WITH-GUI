@@ -306,7 +306,7 @@ class GoToTargetSkill(BaseSkill):
                 },
             )
 
-        pathfinder = AStarPathfinder(cell_size=0.1, obstacle_padding=0.04)
+        pathfinder = AStarPathfinder(cell_size=0.1, obstacle_padding=0.08)
         self.path = pathfinder.find_path(robot_pos, target_pos, obstacle_positions)
 
         if not self.path:

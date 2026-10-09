@@ -9,7 +9,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 sys.path.insert(0, str(ROOT / "backend/controllers/autosim_agent"))
 from skills import GoToTargetSkill, PatrolSkill
 from executor import PlanExecutor
-from graph.actions import validate_step
+from graph.actions import validate_step, reachable
 from test_swarm_graph import ready_mission
 
 
@@ -99,3 +99,27 @@ class LocalNavigationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_step(coordinator.snapshot(), "epuck_1", "PatrolSkill",
                           {"waypoints": ["TARGET_0"], "waypoint_ids": ["TARGET_1"]})
+
+    def test_planner_and_motor_routes_both_keep_clear_of_wall_cells(self):
+        coordinator, _ = ready_mission()
+        state = coordinator.snapshot()
+        state["robots"]["epuck_1"]["position"] = [-.4, 0, 0]
+        state["world_state"]["objects"].append(
+            {"id": "WALL_0", "type": "wall", "position": [0, 0]})
+        planned = reachable(state, "epuck_1", "TARGET_0")
+
+        wall = Mock()
+        wall.getDef.return_value = "WALL_0"
+        wall.getPosition.return_value = [0, 0, 0]
+        children = self.robot.getRoot.return_value.getField.return_value
+        children.getCount.return_value = 1
+        children.getMFNode.return_value = wall
+        self.robot.getSelf.return_value.getPosition.return_value = [-.4, 0, 0]
+        skill = self.goto("TARGET_0")
+        skill.start()
+
+        self.assertFalse(skill.failed)
+        self.assertEqual(planned, skill.path)
+        for x, y in planned:
+            # The wall and its surrounding grid cells must all be excluded.
+            self.assertFalse(abs(round(x, 3)) <= .1 and abs(round(y, 3)) <= .1)
