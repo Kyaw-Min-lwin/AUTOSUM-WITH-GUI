@@ -55,8 +55,8 @@ Copy `env.example` to `.env` in the repository root and set `GROQ_API_KEY`.
 Optionally set `GROQ_MODEL` and `WEBOTS_EXECUTABLE` (default: `webots` on PATH).
 The Gemini key is only needed for the legacy Gemini client.
 
-Configure Webots to use a Python interpreter with `python-socketio` and
-`requests` installed, preferably the same environment as the backend.
+Configure Webots to use a Python interpreter with `python-socketio`,
+`websocket-client`, and `requests` installed, preferably the same environment as the backend.
 Set the Python command in Webots Preferences, or use a local
 `backend/controllers/autosim_agent/runtime.ini`:
 
@@ -111,3 +111,11 @@ and scripted model responses, and fails if the mission does not finish within
   stopping the simulator to end.
 - The Electron security settings and tracked legacy virtual environment still
   need a separate cleanup before distribution.
+
+## Local development improvements
+
+The local working copy was reviewed against the original main commit and this
+branch. Target-ID navigation, late waypoint resolution, 0.08m obstacle padding,
+the `waypoint_ids` patrol alias, and the WebSocket client dependency were retained.
+See [the integration review](docs/local-folder-review.md) for what was adapted,
+already covered, or deliberately left out.

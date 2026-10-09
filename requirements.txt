@@ -15,6 +15,7 @@
 flask>=3.0.0
 flask-socketio>=5.3.0
 python-socketio>=5.11.0          # also used by the Webots controllers to call home
+websocket-client>=1.9.0          # enables the controllers' Socket.IO WebSocket transport
 requests>=2.31.0
 
 # ---- Config --------------------------------------------------------------
@@ -39,6 +40,7 @@ typing-extensions>=4.11.0
 # with Webots and is NOT installable via pip.
 #
 # Make sure the Python interpreter Webots uses also has these installed:
-#     python-socketio, groq, python-dotenv
-# (and google-generativeai only if you enable the Gemini client there).
+#     python-socketio, websocket-client, requests
+# The legacy autosim_supervisor controller additionally needs groq, python-dotenv
+# and google-generativeai for its LLM client module.
 # ============================================================================

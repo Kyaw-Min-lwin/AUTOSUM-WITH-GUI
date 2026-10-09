@@ -13,6 +13,10 @@ dist/
 .env
 .env.*
 
+# Local Python environments (existing tracked files require separate cleanup)
+venv/
+.venv/
+
 # VS Code
 .vscode/
 
