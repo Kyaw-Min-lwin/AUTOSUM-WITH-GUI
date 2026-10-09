@@ -142,9 +142,8 @@ class PlanExecutor:
 
         elif skill_name == "GoToTargetSkill":
             target_id = params.get("target_id")
-            target_node = self.supervisor.getFromDef(target_id)
 
-            if not target_node:
+            if not target_id:
                 print(
                     f"[{self.agent_id} Executor] ERROR: Target {target_id} not found in world!"
                 )
@@ -158,15 +157,13 @@ class PlanExecutor:
                 sio=self.sio,
                 left_motor=self.hardware_map["left_motor"],
                 right_motor=self.hardware_map["right_motor"],
-                target_node=target_node,
+                target_id=target_id,
             )
 
         elif skill_name == "PatrolSkill":
             waypoint_ids = params.get("waypoints", [])
-            waypoint_nodes = [self.supervisor.getFromDef(wid) for wid in waypoint_ids]
-            waypoint_nodes = [n for n in waypoint_nodes if n is not None]
 
-            if not waypoint_nodes:
+            if not waypoint_ids:
                 print(
                     f"[{self.agent_id} Executor] ERROR: PatrolSkill received no valid waypoints."
                 )
@@ -180,7 +177,7 @@ class PlanExecutor:
                 sio=self.sio,
                 left_motor=self.hardware_map["left_motor"],
                 right_motor=self.hardware_map["right_motor"],
-                waypoint_nodes=waypoint_nodes,
+                waypoint_ids=waypoint_ids,
                 goto_skill_class=GoToTargetSkill,
             )
 

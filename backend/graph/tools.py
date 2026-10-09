@@ -33,7 +33,8 @@ def dispatch_physical_action(skill_name: str, parameters: dict,
     """Commit ONE validated action for this objective.
     Skills: GoToTargetSkill(target_id), FollowLeaderSkill(leader_id),
     WanderSkill(duration_seconds), SpinScanSkill(duration_seconds),
-    PatrolSkill(waypoints: list of target IDs). Use parameters as a JSON object.
+    PatrolSkill(waypoints: list of target IDs; waypoint_ids is also accepted).
+    Use parameters as a JSON object. Patrol repeats until stopped.
     """
     step = validate_step(state["swarm"], state["agent_id"], skill_name, parameters)
     return "ACTION_LOCKED: " + json.dumps({"agent_id": state["agent_id"], "plan": [step]})

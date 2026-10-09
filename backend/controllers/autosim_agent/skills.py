@@ -245,14 +245,15 @@ class GoToTargetSkill(BaseSkill):
         sio,
         left_motor,
         right_motor,
-        target_node,
+        target_id,
         forward_speed=3.0,
         turn_speed=1.5,
         angle_tolerance=0.2,
         distance_tolerance=0.1,
     ):
         super().__init__(agent_id, supervisor, sio, left_motor, right_motor)
-        self.target_node = target_node
+        self.target_id = target_id.upper() if isinstance(target_id, str) else None
+        self.target_node = None
         self.forward_speed = forward_speed
         self.turn_speed = turn_speed
         self.angle_tolerance = angle_tolerance
@@ -268,6 +269,21 @@ class GoToTargetSkill(BaseSkill):
 
     def start(self):
         super().start()
+
+        # Resolve on activation, in the simulation thread, rather than retaining
+        # node handles for an entire queued plan.
+        self.target_node = (
+            self.supervisor.getFromDef(self.target_id) if self.target_id else None
+        )
+        if self.target_node is None:
+            self.failed = True
+            self.set_wheel_speeds(0.0, 0.0)
+            if self.sio:
+                self.sio.emit("agent_log", {
+                    "agent": self.agent_id,
+                    "message": f"Target {self.target_id} not found in Webots.",
+                })
+            return
 
         robot_pos = self.get_robot_position()
         target_pos = self.get_target_position()
@@ -421,18 +437,20 @@ class PatrolSkill(BaseSkill):
         sio,
         left_motor,
         right_motor,
-        waypoint_nodes,
+        waypoint_ids,
         goto_skill_class,
     ):
         super().__init__(agent_id, supervisor, sio, left_motor, right_motor)
-        self.waypoint_nodes = waypoint_nodes
+        self.waypoint_ids = list(waypoint_ids)
         self.goto_skill_class = goto_skill_class
         self.current_waypoint_index = 0
         self.active_navigation_skill = None
+        self.failed = False
 
     def start(self):
         super().start()
-        if not self.waypoint_nodes:
+        if not self.waypoint_ids:
+            self.failed = True
             if self.sio:
                 self.sio.emit(
                     "agent_log",
@@ -445,14 +463,14 @@ class PatrolSkill(BaseSkill):
                 "agent_log",
                 {
                     "agent": "PatrolSkill",
-                    "message": f"Patrol route initialized with {len(self.waypoint_nodes)} waypoints.",
+                    "message": f"Patrol route initialized with {len(self.waypoint_ids)} waypoints.",
                 },
             )
 
         self.activate_current_waypoint()
 
     def update(self):
-        if not self.active_navigation_skill:
+        if self.failed or not self.active_navigation_skill:
             return
 
         self.active_navigation_skill.update()
@@ -461,9 +479,14 @@ class PatrolSkill(BaseSkill):
         # WAYPOINT REACHED
         # =====================================
         if self.active_navigation_skill.is_complete():
+            self.active_navigation_skill.stop()
+            if self.active_navigation_skill.failed:
+                # A failed waypoint must fail the patrol, not count as a visit.
+                self.failed = True
+                return
             self.current_waypoint_index += 1
 
-            if self.current_waypoint_index >= len(self.waypoint_nodes):
+            if self.current_waypoint_index >= len(self.waypoint_ids):
                 self.current_waypoint_index = 0
                 if self.sio:
                     self.sio.emit(
@@ -477,14 +500,14 @@ class PatrolSkill(BaseSkill):
             self.activate_current_waypoint()
 
     def activate_current_waypoint(self):
-        target_node = self.waypoint_nodes[self.current_waypoint_index]
+        target_id = self.waypoint_ids[self.current_waypoint_index]
 
         if self.sio:
             self.sio.emit(
                 "agent_log",
                 {
                     "agent": self.agent_id,
-                    "message": f"Navigating to waypoint {self.current_waypoint_index + 1}",
+                    "message": f"Navigating to waypoint {self.current_waypoint_index + 1} ({target_id})",
                 },
             )
 
@@ -494,9 +517,19 @@ class PatrolSkill(BaseSkill):
             sio=self.sio,
             left_motor=self.left_motor,
             right_motor=self.right_motor,
-            target_node=target_node,
+            target_id=target_id,
         )
         self.active_navigation_skill.start()
+        self.failed = self.active_navigation_skill.failed
+
+    def is_complete(self):
+        # Successful patrols repeat until stopped; failures return to the planner.
+        return self.failed
+
+    def stop(self):
+        if self.active_navigation_skill:
+            self.active_navigation_skill.stop()
+        super().stop()
 
 
 class AerialScanSkill(BaseSkill):
